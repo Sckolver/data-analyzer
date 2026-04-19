@@ -1,0 +1,38 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "run_sql",
+      "description": "Выполнить SQL-запрос через DuckDB. В dataset-режиме загруженная таблица называется df. В database-режиме загружены ВСЕ таблицы БД под их исходными именами (например clients, accounts, trades) — обращайся к ним напрямую и используй JOIN / CREATE TEMP VIEW для объединений; алиас df дополнительно указывает на текущую выбранную таблицу. Разрешены ТОЛЬКО читающие операции: SELECT, WITH (CTE), подзапросы, а также CREATE TEMP VIEW / CREATE TEMP TABLE AS SELECT для построения промежуточных подвыборок в рамках того же вызова. Любые модификации исходных данных (INSERT, UPDATE, DELETE, DROP, ALTER, ATTACH, COPY, PRAGMA, SET и т. п.) запрещены и будут отклонены. Возвращает первые строки результата в виде таблицы + количество строк.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "SQL-запрос. Обращайся к таблице как df. Пример: SELECT instrument_type, COUNT(*) AS n FROM df GROUP BY 1 ORDER BY n DESC"
+          }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_pandas",
+      "description": "Выполнить pandas-код на копии загруженных данных. В области видимости доступны: df (pandas.DataFrame — текущий датасет в dataset-режиме или текущая выбранная таблица в database-режиме; глубокая копия, мутации безопасны), tables (dict[str, DataFrame] — все таблицы БД по исходным именам, доступен только в database-режиме), pd (pandas), np (numpy). Запрещены импорты, обращение к файловой системе, сети, приватным атрибутам (__...), eval/exec/open и т.п. Итог должен быть записан в переменную result (DataFrame, Series, scalar, list или dict). Если result — DataFrame/Series, вернутся первые строки + размерность.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Python-код с использованием df/pd/np. Обязательно присвой итог в переменную result. Пример: result = df.groupby('instrument_type')['quantity'].sum().sort_values(ascending=False)"
+          }
+        },
+        "required": ["code"],
+        "additionalProperties": false
+      }
+    }
+  }
+]

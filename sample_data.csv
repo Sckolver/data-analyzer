@@ -1,0 +1,30 @@
+name,age,salary,department,experience,performance_score,city,missing_value
+Alice,28,75000,Engineering,4,8.5,New York,100
+Bob,35,85000,Engineering,8,9.2,San Francisco,
+Charlie,42,95000,Management,15,7.8,Boston,90
+David,29,72000,Engineering,5,8.1,New York,85
+Eve,31,78000,Marketing,6,8.7,Chicago,
+Frank,45,105000,Management,20,9.5,Boston,95
+Grace,26,65000,Marketing,2,7.5,Austin,80
+Henry,38,92000,Engineering,12,8.9,San Francisco,
+Ivy,33,88000,Sales,9,8.3,New York,88
+Jack,41,98000,Management,16,9.1,Boston,92
+Kate,27,70000,Marketing,3,7.9,Chicago,
+Liam,36,90000,Engineering,10,8.8,San Francisco,91
+Mia,30,76000,Sales,7,8.2,Austin,
+Noah,44,102000,Management,18,9.3,Boston,94
+Olivia,25,62000,Marketing,1,7.2,Chicago,78
+Peter,39,94000,Engineering,13,8.6,New York,
+Quinn,32,82000,Sales,8,8.4,San Francisco,87
+Rose,43,100000,Management,17,9.0,Boston,
+Sam,28,74000,Engineering,4,7.7,Austin,82
+Tina,34,86000,Sales,11,8.5,New York,89
+Uma,37,91000,Engineering,12,8.7,Chicago,
+Victor,46,108000,Management,22,9.6,San Francisco,96
+Wendy,29,73000,Marketing,5,7.8,Boston,
+Xavier,40,97000,Engineering,14,8.9,New York,93
+Yara,31,79000,Sales,6,8.0,Austin,84
+Zara,35,87000,Marketing,9,8.6,Chicago,
+Alice,28,75000,Engineering,4,8.5,New York,100
+Bob,35,85000,Engineering,8,9.2,San Francisco,
+

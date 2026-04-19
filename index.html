@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>T-Analyze — Анализ данных с AI</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>T-Analyze</h1>
+                <p class="subtitle">Анализ данных с AI и автоматическими метриками</p>
+            </div>
+            <button class="btn-home" onclick="goHome()" title="На главную">
+                <i class="fas fa-home"></i>
+                <span>На главную</span>
+            </button>
+        </header>
+
+        <!-- Source Selection -->
+        <section class="source-section" id="sourceSection">
+            <!-- Step 1: choose source type -->
+            <div class="source-choice" id="sourceChoice">
+                <h3>Выберите источник данных</h3>
+                <div class="source-cards">
+                    <div class="source-card" onclick="chooseSource('dataset')">
+                        <div class="source-card-icon"><i class="fas fa-file-csv"></i></div>
+                        <h4>Датасет</h4>
+                        <p>Локальный файл: CSV, Excel или JSON</p>
+                    </div>
+                    <div class="source-card" onclick="chooseSource('database')">
+                        <div class="source-card-icon"><i class="fas fa-database"></i></div>
+                        <h4>База данных</h4>
+                        <p>PostgreSQL, MySQL или SQLite</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2a: file upload -->
+            <div class="upload-area" id="uploadArea" style="display: none;">
+                <button class="btn-back" onclick="backToSourceChoice()">
+                    <i class="fas fa-arrow-left"></i> Назад
+                </button>
+                <div class="upload-icon">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                </div>
+                <h3>Загрузите ваш датасет</h3>
+                <p>Поддерживаются форматы: CSV, Excel, JSON</p>
+                <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.json" hidden>
+                <button class="btn-primary" onclick="document.getElementById('fileInput').click()">
+                    Выбрать файл
+                </button>
+                <div class="file-info" id="fileInfo" style="display: none;">
+                    <i class="fas fa-file"></i>
+                    <span id="fileName"></span>
+                    <button class="btn-remove" onclick="removeFile()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Step 2b: DB connection form -->
+            <div class="db-connect" id="dbConnectForm" style="display: none;">
+                <button class="btn-back" onclick="backToSourceChoice()">
+                    <i class="fas fa-arrow-left"></i> Назад
+                </button>
+                <div class="db-connect-icon">
+                    <i class="fas fa-plug"></i>
+                </div>
+                <h3>Подключение к базе данных</h3>
+                <p>Введите параметры подключения</p>
+
+                <form id="dbForm" onsubmit="event.preventDefault(); connectDatabase();">
+                    <div class="form-row">
+                        <label for="dbDialect">Тип СУБД</label>
+                        <select id="dbDialect" onchange="updateDbFormByDialect()">
+                            <option value="postgresql">PostgreSQL</option>
+                            <option value="mysql">MySQL</option>
+                            <option value="sqlite">SQLite</option>
+                        </select>
+                    </div>
+
+                    <div class="form-row" id="dbHostRow">
+                        <label for="dbHost">Host</label>
+                        <input type="text" id="dbHost">
+                    </div>
+                    <div class="form-row" id="dbPortRow">
+                        <label for="dbPort">Port</label>
+                        <input type="number" id="dbPort">
+                    </div>
+                    <div class="form-row">
+                        <label for="dbName" id="dbNameLabel">Имя БД</label>
+                        <input type="text" id="dbName">
+                    </div>
+                    <div class="form-row" id="dbUserRow">
+                        <label for="dbUser">Пользователь</label>
+                        <input type="text" id="dbUser">
+                    </div>
+                    <div class="form-row" id="dbPasswordRow">
+                        <label for="dbPassword">Пароль</label>
+                        <input type="password" id="dbPassword">
+                    </div>
+
+                    <button type="submit" class="btn-primary">
+                        <i class="fas fa-plug"></i> Подключиться
+                    </button>
+                </form>
+            </div>
+        </section>
+
+        <!-- Main Content Area -->
+        <main class="main-content" id="mainContent" style="display: none;">
+            <!-- Dataset / Database Info -->
+            <div class="dataset-info">
+                <h3><i class="fas fa-database"></i> <span id="infoHeading">Информация о датасете</span></h3>
+                <div class="info-grid" id="datasetInfo">
+                    <div class="info-card">
+                        <span class="info-label">Строк:</span>
+                        <span class="info-value" id="rowCount">-</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Столбцов:</span>
+                        <span class="info-value" id="colCount">-</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Размер:</span>
+                        <span class="info-value" id="fileSize">-</span>
+                    </div>
+                    <div class="info-card">
+                        <span class="info-label">Формат:</span>
+                        <span class="info-value" id="fileFormat">-</span>
+                    </div>
+                </div>
+
+                <!-- Table picker (только в DB-режиме) -->
+                <div class="table-picker" id="tablePickerRow" style="display: none;">
+                    <label for="tablePicker"><i class="fas fa-table"></i> Таблица:</label>
+                    <select id="tablePicker" onchange="onTableChange(this.value)"></select>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="quality">
+                    <i class="fas fa-check-circle"></i> Качество данных
+                </button>
+                <button class="tab-btn" data-tab="viz">
+                    <i class="fas fa-chart-bar"></i> Визуализации
+                </button>
+                <button class="tab-btn" data-tab="chat">
+                    <i class="fas fa-robot"></i> AI Ассистент
+                </button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="tab-content">
+                <!-- Data Quality Tab -->
+                <div class="tab-pane active" id="quality">
+                    <h2>Метрики качества данных</h2>
+                    
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <i class="fas fa-percent"></i>
+                                <h4>Полнота данных</h4>
+                            </div>
+                            <div class="metric-value" id="completeness">
+                                <span class="value-large">-</span>
+                                <span class="value-unit">%</span>
+                            </div>
+                            <div class="metric-detail" id="completenessDetail"></div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <h4>Пропущенные значения</h4>
+                            </div>
+                            <div class="metric-value" id="missing">
+                                <span class="value-large">-</span>
+                                <span class="value-unit">ячеек</span>
+                            </div>
+                            <div class="metric-detail" id="missingDetail"></div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <i class="fas fa-copy"></i>
+                                <h4>Дубликаты</h4>
+                            </div>
+                            <div class="metric-value" id="duplicates">
+                                <span class="value-large">-</span>
+                                <span class="value-unit">строк</span>
+                            </div>
+                            <div class="metric-detail" id="duplicatesDetail"></div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <i class="fas fa-database"></i>
+                                <h4>Типы данных</h4>
+                            </div>
+                            <div class="metric-value" id="datatypes">
+                                <span class="value-large">-</span>
+                                <span class="value-unit">типов</span>
+                            </div>
+                            <div class="metric-detail" id="datatypesDetail"></div>
+                        </div>
+                    </div>
+
+                    <div class="quality-table">
+                        <h3>Детальный анализ по столбцам</h3>
+                        <div class="table-container">
+                            <table id="qualityTable">
+                                <thead>
+                                    <tr>
+                                        <th>Столбец</th>
+                                        <th>Тип</th>
+                                        <th>Пропуски</th>
+                                        <th>Уникальных</th>
+                                        <th>Статус</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Будет заполнено JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visualizations Tab -->
+                <div class="tab-pane" id="viz">
+                    <h2>Визуализации</h2>
+                    
+                    <div class="viz-controls">
+                        <div class="control-group" id="vizTableGroup" style="display: none;">
+                            <label for="vizTablePicker">Таблица:</label>
+                            <select id="vizTablePicker" onchange="onTableChange(this.value)"></select>
+                        </div>
+
+                        <div class="control-group">
+                            <label for="vizType">Тип визуализации:</label>
+                            <select id="vizType">
+                                <option value="distribution">Распределение</option>
+                                <option value="correlation">Корреляция</option>
+                                <option value="missing">Карта пропусков</option>
+                                <option value="outliers">Выбросы</option>
+                            </select>
+                        </div>
+                        
+                        <div class="control-group">
+                            <label for="columnSelect">Столбец:</label>
+                            <select id="columnSelect">
+                                <option>Выберите столбец...</option>
+                            </select>
+                        </div>
+
+                        <button class="btn-primary" onclick="generateVisualization()">
+                            <i class="fas fa-chart-line"></i> Построить график
+                        </button>
+                    </div>
+
+                    <div class="viz-container">
+                        <canvas id="chartCanvas"></canvas>
+                        <div class="viz-placeholder" id="vizPlaceholder">
+                            <i class="fas fa-chart-bar"></i>
+                            <p>Выберите параметры и нажмите "Построить график"</p>
+                        </div>
+                    </div>
+
+                    <div class="viz-grid">
+                        <div class="viz-card">
+                            <h4>Быстрые визуализации</h4>
+                            <div class="quick-viz-buttons">
+                                <button class="btn-secondary" onclick="quickViz('types')">
+                                    <i class="fas fa-table"></i> Типы столбцов
+                                </button>
+                                <button class="btn-secondary" onclick="quickViz('missing')">
+                                    <i class="fas fa-exclamation-circle"></i> Пропуски
+                                </button>
+                                <button class="btn-secondary" onclick="quickViz('stats')">
+                                    <i class="fas fa-calculator"></i> Статистика
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Chat Tab -->
+                <div class="tab-pane" id="chat">
+                    <h2>Настя — AI ассистент для анализа данных ✿</h2>
+                    
+                    <div class="chat-container">
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="chat-message assistant" id="chatGreeting">
+                                <div class="message-avatar">
+                                    <i class="fas fa-heart" style="color:#ec4899;"></i>
+                                </div>
+                                <div class="message-content">
+                                    <p id="chatGreetingText">Приветик! Я Настя ✿ Загружай датасет и спрашивай что угодно — я посмотрю сама через SQL и pandas и всё тебе расскажу ☺️</p>
+                                    <div class="suggestions">
+                                        <p><strong>Например, можно спросить:</strong></p>
+                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                            Какие столбцы имеют наибольшее количество пропусков?
+                                        </button>
+                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                            Покажи статистику по числовым столбцам
+                                        </button>
+                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                            Есть ли корреляция между столбцами?
+                                        </button>
+                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                            Найди выбросы в данных
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="chat-input-container">
+                            <div class="chat-input-wrapper">
+                                <input 
+                                    type="text" 
+                                    id="chatInput" 
+                                    placeholder="Задайте вопрос о датасете..."
+                                    onkeypress="handleChatKeypress(event)"
+                                >
+                                <button class="btn-send" onclick="sendMessage()">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                            <div class="chat-info">
+                                <span class="status-indicator" id="aiStatus">
+                                    <i class="fas fa-circle"></i> Backend не подключен
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+

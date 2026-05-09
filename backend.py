@@ -598,14 +598,34 @@ async def get_distribution(
         }))
 
 
+_DYNAMICS_AGG_LABELS = {
+    "sum": "Сумма",
+    "mean": "Среднее",
+    "median": "Медиана",
+    "min": "Минимум",
+    "max": "Максимум",
+    "count": "Количество",
+    "nunique": "Уникальных",
+}
+
+
 @app.get("/api/visualization/dynamics")
 async def get_dynamics(
     date_column: str,
     value_column: str,
+    agg: str = Query(default="sum"),
     table: Optional[str] = Query(default=None),
 ):
-    """Динамика: суммы value_column по датам из date_column (агрегация по дню)."""
+    """Динамика: агрегация value_column по дням из date_column.
+
+    agg: sum | mean | median | min | max | count | nunique
+    Для count/nunique значения колонки могут быть нечисловыми.
+    """
     df = _select_dataset(table)
+
+    agg_key = (agg or "sum").lower().strip()
+    if agg_key not in _DYNAMICS_AGG_LABELS:
+        raise HTTPException(status_code=400, detail=f"Неизвестная агрегация: {agg}")
 
     if date_column not in df.columns:
         raise HTTPException(status_code=404, detail=f"Столбец даты '{date_column}' не найден")
@@ -613,24 +633,53 @@ async def get_dynamics(
         raise HTTPException(status_code=404, detail=f"Столбец значений '{value_column}' не найден")
 
     parsed_dates = pd.to_datetime(df[date_column], errors='coerce')
-    values = pd.to_numeric(df[value_column], errors='coerce')
 
-    work = pd.DataFrame({"_date": parsed_dates, "_value": values}).dropna()
+    # Для count/nunique числовое приведение не нужно — считаем по сырым значениям
+    if agg_key in ("count", "nunique"):
+        raw_values = df[value_column]
+        work = pd.DataFrame({"_date": parsed_dates, "_value": raw_values}).dropna(subset=["_date"])
+    else:
+        numeric_values = pd.to_numeric(df[value_column], errors='coerce')
+        work = pd.DataFrame({"_date": parsed_dates, "_value": numeric_values}).dropna()
+
     if work.empty:
         return JSONResponse(to_py({
             "success": True,
             "data": {"labels": [], "values": []},
-            "warning": "Нет валидных пар (дата, число) для построения динамики",
+            "agg": agg_key,
+            "agg_label": _DYNAMICS_AGG_LABELS[agg_key],
+            "warning": "Нет валидных пар (дата, значение) для построения динамики",
         }))
 
     work["_date"] = work["_date"].dt.date
-    grouped = work.groupby("_date", as_index=True)["_value"].sum().sort_index()
+    grouped_obj = work.groupby("_date", as_index=True)["_value"]
+
+    if agg_key == "sum":
+        grouped = grouped_obj.sum()
+    elif agg_key == "mean":
+        grouped = grouped_obj.mean()
+    elif agg_key == "median":
+        grouped = grouped_obj.median()
+    elif agg_key == "min":
+        grouped = grouped_obj.min()
+    elif agg_key == "max":
+        grouped = grouped_obj.max()
+    elif agg_key == "count":
+        grouped = grouped_obj.count()
+    elif agg_key == "nunique":
+        grouped = grouped_obj.nunique()
+    else:
+        raise HTTPException(status_code=400, detail=f"Неподдерживаемая агрегация: {agg_key}")
+
+    grouped = grouped.sort_index()
 
     return JSONResponse(to_py({
         "success": True,
+        "agg": agg_key,
+        "agg_label": _DYNAMICS_AGG_LABELS[agg_key],
         "data": {
             "labels": [d.isoformat() for d in grouped.index],
-            "values": [float(v) for v in grouped.values],
+            "values": [float(v) if pd.notna(v) else None for v in grouped.values],
         }
     }))
 

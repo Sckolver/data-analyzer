@@ -148,23 +148,25 @@
                     <select id="tablePicker" onchange="onTableChange(this.value)"></select>
                 </div>
 
-                <h4 class="meta-grid-title"><i class="fas fa-id-card"></i> Метаданные источника</h4>
-                <div class="info-grid info-grid-meta" id="datasetMetaInfo">
-                    <div class="info-card info-card--meta">
-                        <span class="info-label"><i class="fas fa-user-tie"></i> Владелец</span>
-                        <span class="info-value-meta" id="metaOwner">Анастасия Князева</span>
-                    </div>
-                    <div class="info-card info-card--meta">
-                        <span class="info-label"><i class="fas fa-bullseye"></i> Назначение</span>
-                        <span class="info-value-meta" id="metaPurpose">Аналитика инвестиционных операций</span>
-                    </div>
-                    <div class="info-card info-card--meta">
-                        <span class="info-label"><i class="fas fa-sync-alt"></i> Частота обновления</span>
-                        <span class="info-value-meta" id="metaUpdate">Обновлено сегодня 09:00</span>
-                    </div>
-                    <div class="info-card info-card--meta">
-                        <span class="info-label"><i class="fas fa-shield-alt"></i> Чувствительность</span>
-                        <span class="info-value-meta" id="metaSensitivity">Конфиденциально</span>
+                <div id="metaSection" style="display: none;">
+                    <h4 class="meta-grid-title"><i class="fas fa-id-card"></i> Метаданные источника</h4>
+                    <div class="info-grid info-grid-meta" id="datasetMetaInfo">
+                        <div class="info-card info-card--meta">
+                            <span class="info-label"><i class="fas fa-user-tie"></i> Владелец</span>
+                            <span class="info-value-meta" id="metaOwner">Анастасия Князева</span>
+                        </div>
+                        <div class="info-card info-card--meta">
+                            <span class="info-label"><i class="fas fa-bullseye"></i> Назначение</span>
+                            <span class="info-value-meta" id="metaPurpose">Аналитика инвестиционных операций</span>
+                        </div>
+                        <div class="info-card info-card--meta">
+                            <span class="info-label"><i class="fas fa-sync-alt"></i> Частота обновления</span>
+                            <span class="info-value-meta" id="metaUpdate">Обновлено 09:00 01.01.2026</span>
+                        </div>
+                        <div class="info-card info-card--meta">
+                            <span class="info-label"><i class="fas fa-shield-alt"></i> Чувствительность</span>
+                            <span class="info-value-meta" id="metaSensitivity">Конфиденциально</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -290,6 +292,19 @@
                             <label for="columnSelect" id="columnSelectLabel">Столбец:</label>
                             <select id="columnSelect">
                                 <option>Выберите столбец...</option>
+                            </select>
+                        </div>
+
+                        <div class="control-group" id="aggSelectGroup" style="display: none;">
+                            <label for="aggSelect">Агрегация:</label>
+                            <select id="aggSelect">
+                                <option value="sum">Сумма</option>
+                                <option value="mean">Среднее</option>
+                                <option value="median">Медиана</option>
+                                <option value="min">Минимум</option>
+                                <option value="max">Максимум</option>
+                                <option value="count">Количество</option>
+                                <option value="nunique">Уникальных</option>
                             </select>
                         </div>
 

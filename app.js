@@ -336,10 +336,20 @@ function formatTodayUpdateLabel() {
     const dd = String(now.getDate()).padStart(2, '0');
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const yyyy = now.getFullYear();
-    return `Обновлено ${dd}.${mm}.${yyyy} 09:00`;
+    return `Обновлено 09:00 ${dd}.${mm}.${yyyy}`;
 }
 
 function fillSourceMetadataCards() {
+    // Метаданные показываем ТОЛЬКО для БД-источника. Для датасета — скрываем целиком.
+    const section = document.getElementById('metaSection');
+    if (!section) return;
+
+    if (dataSourceMode !== 'database') {
+        section.style.display = 'none';
+        return;
+    }
+    section.style.display = '';
+
     // Захардкоженные значения для демонстрационных целей
     const meta = {
         owner: 'Анастасия Князева',
@@ -592,19 +602,23 @@ function onVizTypeChange() {
     const dateGroup = document.getElementById('dateColumnGroup');
     const colGroup = document.getElementById('columnSelectGroup');
     const colLabel = document.getElementById('columnSelectLabel');
+    const aggGroup = document.getElementById('aggSelectGroup');
 
     if (vizType === 'dynamics') {
         if (dateGroup) dateGroup.style.display = '';
         if (colGroup) colGroup.style.display = '';
-        if (colLabel) colLabel.textContent = 'Сумма по столбцу:';
+        if (colLabel) colLabel.textContent = 'Столбец значений:';
+        if (aggGroup) aggGroup.style.display = '';
     } else if (vizType === 'missing') {
         if (dateGroup) dateGroup.style.display = 'none';
         if (colGroup) colGroup.style.display = 'none';
         if (colLabel) colLabel.textContent = 'Столбец:';
+        if (aggGroup) aggGroup.style.display = 'none';
     } else {
         if (dateGroup) dateGroup.style.display = 'none';
         if (colGroup) colGroup.style.display = '';
         if (colLabel) colLabel.textContent = 'Столбец:';
+        if (aggGroup) aggGroup.style.display = 'none';
     }
 }
 
@@ -625,17 +639,19 @@ async function generateVisualization() {
     if (vizType === 'dynamics') {
         const dateColEl = document.getElementById('dateColumnSelect');
         const dateCol = dateColEl ? dateColEl.value : '';
+        const aggEl = document.getElementById('aggSelect');
+        const agg = aggEl ? aggEl.value : 'sum';
         if (!dateCol || dateCol === 'Выберите столбец даты...') {
             alert('Выберите столбец с датой');
             return;
         }
         if (!column || column === 'Выберите столбец...') {
-            alert('Выберите числовой столбец для суммирования');
+            alert('Выберите столбец значений для агрегации');
             return;
         }
         document.getElementById('vizPlaceholder').style.display = 'none';
         try {
-            await createDynamicsChart(dateCol, column);
+            await createDynamicsChart(dateCol, column, agg);
         } catch (error) {
             alert('Ошибка создания визуализации: ' + error.message);
             console.error(error);
@@ -904,9 +920,13 @@ async function createOutliersChart(column) {
     document.getElementById('vizPlaceholder').style.display = 'none';
 }
 
-async function createDynamicsChart(dateCol, valueCol) {
+async function createDynamicsChart(dateCol, valueCol, agg) {
+    const aggKey = agg || 'sum';
     const url = buildTableQuery(
-        `${API_BASE_URL}/api/visualization/dynamics?date_column=${encodeURIComponent(dateCol)}&value_column=${encodeURIComponent(valueCol)}`
+        `${API_BASE_URL}/api/visualization/dynamics`
+        + `?date_column=${encodeURIComponent(dateCol)}`
+        + `&value_column=${encodeURIComponent(valueCol)}`
+        + `&agg=${encodeURIComponent(aggKey)}`
     );
     const response = await fetch(url);
 
@@ -917,6 +937,7 @@ async function createDynamicsChart(dateCol, valueCol) {
 
     const result = await response.json();
     const data = result.data || { labels: [], values: [] };
+    const aggLabel = result.agg_label || aggKey;
 
     if (currentChart) {
         currentChart.destroy();
@@ -927,7 +948,7 @@ async function createDynamicsChart(dateCol, valueCol) {
         data: {
             labels: data.labels,
             datasets: [{
-                label: `Сумма ${valueCol} по дате (${dateCol})`,
+                label: `${aggLabel} ${valueCol} по дате (${dateCol})`,
                 data: data.values,
                 borderColor: 'rgba(79, 70, 229, 1)',
                 backgroundColor: 'rgba(79, 70, 229, 0.15)',
@@ -950,7 +971,7 @@ async function createDynamicsChart(dateCol, valueCol) {
                 },
                 y: {
                     beginAtZero: true,
-                    title: { display: true, text: `Сумма ${valueCol}` }
+                    title: { display: true, text: `${aggLabel} ${valueCol}` }
                 }
             }
         }

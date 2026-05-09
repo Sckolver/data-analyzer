@@ -5,44 +5,10 @@ let dataSourceMode = null;       // 'dataset' | 'database'
 let currentTableName = null;     // имя выбранной таблицы в режиме database
 let dbTables = [];               // список таблиц БД (meta)
 let dbMeta = {};                 // { dialect, dbname }
-let chatList = [];               // [{id, name, updated_at, messages_count}]
+let currentSourceId = null;      // идентификатор текущего источника (для чатов)
 let currentChatId = null;        // активный чат
+let chatsCache = [];             // последний загруженный список чатов
 const API_BASE_URL = 'http://localhost:8765';
-
-// Метаданные источников (для demo-БД investment_department_db).
-// Если таблицы здесь нет — карточки показывают «—».
-const DB_METADATA = {
-    clients: {
-        owner: 'Команда CRM (Анна Соколова)',
-        purpose: 'Профили клиентов, риск-профиль, контакты',
-        frequency: 'Ежедневно (ночной ETL)',
-        sensitivity: 'Высокая — PII (имя, email)'
-    },
-    accounts: {
-        owner: 'Брокерский back-office',
-        purpose: 'Счета клиентов, балансы, статусы',
-        frequency: 'Каждые 15 минут',
-        sensitivity: 'Высокая — финансовые данные'
-    },
-    instruments: {
-        owner: 'Команда инструментов / Reference Data',
-        purpose: 'Справочник торговых инструментов',
-        frequency: 'Ежедневно после закрытия рынка',
-        sensitivity: 'Низкая — публичные справочные данные'
-    },
-    trades: {
-        owner: 'Trading Desk',
-        purpose: 'Журнал всех сделок клиентов',
-        frequency: 'Real-time (стриминг из биржи)',
-        sensitivity: 'Средняя — операционные данные клиентов'
-    },
-    cash_transactions: {
-        owner: 'Operations / Treasury',
-        purpose: 'Денежные операции по счетам (ввод/вывод/комиссии)',
-        frequency: 'Каждый час',
-        sensitivity: 'Высокая — финансовые транзакции'
-    }
-};
 
 // Initialize event listeners
 document.addEventListener('DOMContentLoaded', () => {
@@ -68,7 +34,6 @@ function initializeEventListeners() {
     uploadArea.addEventListener('drop', handleDrop);
     uploadArea.addEventListener('dragleave', handleDragLeave);
 
-    // Тип визуализации — переключаем видимость полей под него.
     const vizTypeEl = document.getElementById('vizType');
     if (vizTypeEl) vizTypeEl.addEventListener('change', onVizTypeChange);
 }
@@ -101,8 +66,10 @@ function goHome() {
     currentTableName = null;
     dbTables = [];
     dbMeta = {};
-    chatList = [];
+    currentSourceId = null;
     currentChatId = null;
+    chatsCache = [];
+    renderChatList();
     if (currentChart) {
         try { currentChart.destroy(); } catch (_) {}
         currentChart = null;
@@ -226,12 +193,9 @@ async function processFile(file) {
         currentTableName = null;
         dbTables = [];
         dbMeta = {};
-        chatList = [];
-        currentChatId = null;
         applyModeLabels('dataset');
 
         await loadAnalysis({ file, displaySize: null });
-        await loadChatList();
         hideLoadingState();
         
     } catch (error) {
@@ -290,12 +254,9 @@ async function connectDatabase() {
         }
 
         applyModeLabels('database');
-        chatList = [];
-        currentChatId = null;
 
         showLoadingState('Анализ данных...');
         await loadAnalysis({ fileLike: { name: dbMeta.dbname }, displaySize: null });
-        await loadChatList();
         hideLoadingState();
     } catch (err) {
         hideLoadingState();
@@ -354,7 +315,6 @@ async function onTableChange(newTable) {
     const vizPicker = document.getElementById('vizTablePicker');
     if (mainPicker && mainPicker.value !== newTable) mainPicker.value = newTable;
     if (vizPicker && vizPicker.value !== newTable) vizPicker.value = newTable;
-    renderDbMetadata(newTable);
 
     showLoadingState(`Анализ таблицы «${newTable}»...`);
     try {
@@ -371,6 +331,32 @@ async function onTableChange(newTable) {
 // Mode labels
 // ---------------------------------------------------------------------------
 
+function formatTodayUpdateLabel() {
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    return `Обновлено ${dd}.${mm}.${yyyy} 09:00`;
+}
+
+function fillSourceMetadataCards() {
+    // Захардкоженные значения для демонстрационных целей
+    const meta = {
+        owner: 'Анастасия Князева',
+        purpose: 'Аналитика инвестиционных операций',
+        update: formatTodayUpdateLabel(),
+        sensitivity: 'Конфиденциально',
+    };
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
+    set('metaOwner', meta.owner);
+    set('metaPurpose', meta.purpose);
+    set('metaUpdate', meta.update);
+    set('metaSensitivity', meta.sensitivity);
+}
+
 function applyModeLabels(mode) {
     const isDb = mode === 'database';
     const infoHeading = document.getElementById('infoHeading');
@@ -379,31 +365,9 @@ function applyModeLabels(mode) {
     const greetEl = document.getElementById('chatGreetingText');
     if (greetEl) {
         greetEl.textContent = isDb
-            ? 'Приветик! Я Настя ✿ Подключи БД и спрашивай про таблицы и связи — я сама схожу в SQL/pandas и всё расскажу ☺️'
-            : 'Приветик! Я Настя ✿ Загружай датасет и спрашивай что угодно — я посмотрю сама через SQL и pandas и всё тебе расскажу ☺️';
+            ? 'Привет! Я — AI-ассистент по анализу данных в сфере инвестиций. Задавай вопрос на основе данных из подключенной БД ☺️'
+            : 'Привет! Я — AI-ассистент по анализу данных в сфере инвестиций. Задавай вопрос на основе данных из загруженного датасета ☺️';
     }
-
-    const dbMetaGrid = document.getElementById('dbMetaGrid');
-    if (dbMetaGrid) dbMetaGrid.style.display = isDb ? 'grid' : 'none';
-}
-
-function renderDbMetadata(tableName) {
-    const grid = document.getElementById('dbMetaGrid');
-    if (!grid) return;
-    if (dataSourceMode !== 'database') {
-        grid.style.display = 'none';
-        return;
-    }
-    grid.style.display = 'grid';
-    const meta = (tableName && DB_METADATA[tableName]) || {};
-    const set = (id, val) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = (val && String(val).trim()) || '—';
-    };
-    set('dbOwner', meta.owner);
-    set('dbPurpose', meta.purpose);
-    set('dbFrequency', meta.frequency);
-    set('dbSensitivity', meta.sensitivity);
 }
 
 function parseCSV(text) {
@@ -431,8 +395,10 @@ function removeFile() {
     currentTableName = null;
     dbTables = [];
     dbMeta = {};
-    chatList = [];
+    currentSourceId = null;
     currentChatId = null;
+    chatsCache = [];
+    renderChatList();
     document.getElementById('fileInput').value = '';
     document.getElementById('fileInfo').style.display = 'none';
     document.getElementById('mainContent').style.display = 'none';
@@ -473,11 +439,12 @@ function displayDatasetFromBackend(file, analysisData) {
     // Убедимся, что таблица-пикеры актуальны (в DB-режиме).
     if (dataSourceMode === 'database') {
         renderTablePickers();
-        renderDbMetadata(currentTableName);
-    } else {
-        renderDbMetadata(null);
     }
-    
+
+    fillSourceMetadataCards();
+
+    refreshSourceAndChats().catch(err => console.warn('chats init failed', err));
+
     // Scroll to content
     document.getElementById('mainContent').scrollIntoView({ behavior: 'smooth' });
 }
@@ -502,7 +469,7 @@ function displayQualityMetrics(analysisData) {
     document.getElementById('missingDetail').textContent = `${quality.missing_percentage.toFixed(1)}% всех данных`;
     
     document.getElementById('duplicates').querySelector('.value-large').textContent = duplicates.total_duplicate_rows;
-    document.getElementById('duplicatesDetail').textContent = duplicates.percentage > 0 ? `${duplicates.percentage}% строк` : 'Отлично!';
+    document.getElementById('duplicatesDetail').textContent = duplicates.percentage > 0 ? `${duplicates.percentage}% строк` : 'Дубликатов не обнаружено';
     
     const dtypes = Object.keys(analysisData.data_types);
     document.getElementById('datatypes').querySelector('.value-large').textContent = dtypes.length;
@@ -534,7 +501,7 @@ function displayQualityMetrics(analysisData) {
             extraInfo += `<br><small>⚠️ Выбросов: ${col.outliers.count} (${col.outliers.percentage}%)</small>`;
         }
         if (col.entropy) {
-            extraInfo += `<br><small>📊 Энтропия: ${col.entropy}</small>`;
+            extraInfo += `<br><small>📊 Энтропия (непредсказуемость данных): ${col.entropy}</small>`;
         }
         
         row.innerHTML = `
@@ -544,7 +511,7 @@ function displayQualityMetrics(analysisData) {
             </td>
             <td>
                 <span class="type-badge">${col.type}</span>
-                ${col.statistics ? `<br><small>μ=${col.statistics.mean.toFixed(2)}, σ=${col.statistics.std.toFixed(2)}</small>` : ''}
+                ${col.statistics ? `<br><small>avg=${col.statistics.mean.toFixed(2)}, sd=${col.statistics.std.toFixed(2)}</small>` : ''}
             </td>
             <td>${col.missing_count} (${col.missing_percentage}%)</td>
             <td>
@@ -583,196 +550,18 @@ function switchTab(tabName) {
         pane.classList.remove('active');
     });
     document.getElementById(tabName).classList.add('active');
-
-    if (tabName === 'chat') {
-        loadChatList().catch(err => console.error('chats load failed:', err));
-    }
 }
 
-// ---------------------------------------------------------------------------
-// Multi-chat sidebar
-// ---------------------------------------------------------------------------
-
-async function loadChatList() {
-    if (!currentDataset) return;
-    try {
-        const resp = await fetch(`${API_BASE_URL}/api/chats`);
-        if (!resp.ok) {
-            const t = await resp.text();
-            throw new Error(`${resp.status}: ${t}`);
-        }
-        const data = await resp.json();
-        chatList = data.chats || [];
-        renderChatList();
-    } catch (err) {
-        console.error('Не удалось получить список чатов:', err);
-    }
+function looksLikeDateColumn(colInfo) {
+    if (!colInfo) return false;
+    if (colInfo.type === 'datetime') return true;
+    const n = String(colInfo.name || '').toLowerCase();
+    return /(date|dt|time|created|updated|opened|closed|трад|дата)/.test(n);
 }
 
-function renderChatList() {
-    const container = document.getElementById('chatList');
-    if (!container) return;
-    if (!chatList.length) {
-        container.innerHTML = '<div class="chat-list-empty">Нажмите «+ Новый чат», чтобы начать.</div>';
-        updateCurrentChatName();
-        return;
-    }
-    container.innerHTML = '';
-    chatList.forEach(chat => {
-        const item = document.createElement('div');
-        item.className = 'chat-list-item' + (chat.id === currentChatId ? ' active' : '');
-        item.title = chat.name;
-        item.innerHTML = `
-            <span class="chat-list-item-name">${escapeHtml(chat.name)}</span>
-            <span class="chat-list-item-actions">
-                <button title="Переименовать" data-action="rename"><i class="fas fa-pen"></i></button>
-                <button title="Удалить" class="danger" data-action="delete"><i class="fas fa-trash"></i></button>
-            </span>
-        `;
-        item.addEventListener('click', (ev) => {
-            const btn = ev.target.closest('button[data-action]');
-            if (btn) {
-                ev.stopPropagation();
-                if (btn.dataset.action === 'rename') return renameChat(chat.id);
-                if (btn.dataset.action === 'delete') return deleteChat(chat.id);
-                return;
-            }
-            selectChat(chat.id);
-        });
-        container.appendChild(item);
-    });
-    updateCurrentChatName();
-}
-
-function updateCurrentChatName() {
-    const el = document.getElementById('chatCurrentName');
-    if (!el) return;
-    if (!currentChatId) {
-        el.textContent = '';
-        return;
-    }
-    const chat = chatList.find(c => c.id === currentChatId);
-    el.textContent = chat ? `Чат: ${chat.name}` : '';
-}
-
-async function createNewChat() {
-    if (!currentDataset) {
-        alert(dataSourceMode === 'database' ? 'Сначала подключите базу данных' : 'Сначала загрузите датасет');
-        return;
-    }
-    try {
-        const resp = await fetch(`${API_BASE_URL}/api/chats`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-        if (!resp.ok) {
-            const t = await resp.text();
-            throw new Error(`${resp.status}: ${t}`);
-        }
-        const data = await resp.json();
-        currentChatId = data.chat.id;
-        await loadChatList();
-        clearChatMessages();
-    } catch (err) {
-        alert('Не удалось создать чат: ' + err.message);
-    }
-}
-
-async function selectChat(chatId) {
-    if (!chatId || chatId === currentChatId) return;
-    currentChatId = chatId;
-    renderChatList();
-    try {
-        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`);
-        if (!resp.ok) {
-            const t = await resp.text();
-            throw new Error(`${resp.status}: ${t}`);
-        }
-        const data = await resp.json();
-        renderChatHistory(data.chat?.messages || []);
-    } catch (err) {
-        alert('Не удалось загрузить чат: ' + err.message);
-    }
-}
-
-async function renameChat(chatId) {
-    const chat = chatList.find(c => c.id === chatId);
-    const current = chat?.name || '';
-    const next = prompt('Новое название чата:', current);
-    if (next === null) return;
-    const trimmed = next.trim();
-    if (!trimmed || trimmed === current) return;
-    try {
-        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: trimmed })
-        });
-        if (!resp.ok) {
-            const t = await resp.text();
-            throw new Error(`${resp.status}: ${t}`);
-        }
-        await loadChatList();
-    } catch (err) {
-        alert('Не удалось переименовать: ' + err.message);
-    }
-}
-
-async function deleteChat(chatId) {
-    if (!confirm('Удалить этот чат? Историю восстановить не получится.')) return;
-    try {
-        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
-            method: 'DELETE'
-        });
-        if (!resp.ok) {
-            const t = await resp.text();
-            throw new Error(`${resp.status}: ${t}`);
-        }
-        if (currentChatId === chatId) {
-            currentChatId = null;
-            clearChatMessages();
-        }
-        await loadChatList();
-    } catch (err) {
-        alert('Не удалось удалить: ' + err.message);
-    }
-}
-
-function clearChatMessages() {
-    const messages = document.getElementById('chatMessages');
-    if (!messages) return;
-    messages.innerHTML = '';
-    const greeting = document.createElement('div');
-    greeting.className = 'chat-message assistant';
-    const text = dataSourceMode === 'database'
-        ? 'Приветик! Я Настя ✿ Это новый чат — спрашивай что угодно про подключённую БД ☺️'
-        : 'Приветик! Я Настя ✿ Это новый чат — спрашивай что угодно про загруженный датасет ☺️';
-    greeting.innerHTML = `
-        <div class="message-avatar"><i class="fas fa-heart" style="color:#ec4899;"></i></div>
-        <div class="message-content"><p>${escapeHtml(text)}</p></div>
-    `;
-    messages.appendChild(greeting);
-}
-
-function renderChatHistory(messages) {
-    const container = document.getElementById('chatMessages');
-    if (!container) return;
-    container.innerHTML = '';
-    if (!messages.length) {
-        clearChatMessages();
-        return;
-    }
-    messages.forEach(m => {
-        addChatMessage(m.content || '', m.role === 'user' ? 'user' : 'assistant');
-    });
-}
-
-// Visualization
 function populateColumnSelect(columns) {
-    // columns теперь — массив имён, но колонки с типами берём из currentDataset.columns.
     const select = document.getElementById('columnSelect');
-    select.innerHTML = '<option value="">Выберите столбец...</option>';
+    select.innerHTML = '<option>Выберите столбец...</option>';
 
     columns.forEach(col => {
         const option = document.createElement('option');
@@ -781,81 +570,41 @@ function populateColumnSelect(columns) {
         select.appendChild(option);
     });
 
-    // Y-селектор перезаполняется при смене типа визуализации (зависит от того, что нужно).
-    onVizTypeChange();
-}
-
-function _columnsByPredicate(predicate) {
-    if (!currentDataset || !Array.isArray(currentDataset.columns)) return [];
-    return currentDataset.columns.filter(predicate).map(c => c.name);
-}
-
-function _isDateColumn(col) {
-    if (!col) return false;
-    if (col.type === 'datetime') return true;
-    // Эвристика: имя колонки выглядит как дата.
-    const name = (col.name || '').toLowerCase();
-    return /(^|_)(date|dt|day|month|year|created|updated|opened|closed|at)($|_)/.test(name);
-}
-
-function _isNumericColumn(col) {
-    return col && (col.type === 'numeric' || col.type === 'binary');
+    const dateSelect = document.getElementById('dateColumnSelect');
+    if (dateSelect) {
+        dateSelect.innerHTML = '<option>Выберите столбец даты...</option>';
+        const colInfos = (currentDataset && Array.isArray(currentDataset.columns))
+            ? currentDataset.columns
+            : columns.map(name => ({ name }));
+        const dateCandidates = colInfos.filter(looksLikeDateColumn);
+        const list = dateCandidates.length > 0 ? dateCandidates : colInfos;
+        list.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.name;
+            opt.textContent = c.name + (c.type ? ` (${c.type})` : '');
+            dateSelect.appendChild(opt);
+        });
+    }
 }
 
 function onVizTypeChange() {
     const vizType = document.getElementById('vizType').value;
+    const dateGroup = document.getElementById('dateColumnGroup');
     const colGroup = document.getElementById('columnSelectGroup');
     const colLabel = document.getElementById('columnSelectLabel');
-    const colSelect = document.getElementById('columnSelect');
-    const yGroup = document.getElementById('yColumnGroup');
-    const ySelect = document.getElementById('yColumnSelect');
-
-    if (vizType === 'missing') {
-        if (colGroup) colGroup.style.display = 'none';
-        if (yGroup) yGroup.style.display = 'none';
-        return;
-    }
 
     if (vizType === 'dynamics') {
+        if (dateGroup) dateGroup.style.display = '';
         if (colGroup) colGroup.style.display = '';
-        if (yGroup) yGroup.style.display = '';
-        if (colLabel) colLabel.textContent = 'Столбец X (дата):';
-
-        const dateCols = _columnsByPredicate(_isDateColumn);
-        const numericCols = _columnsByPredicate(_isNumericColumn);
-
-        const fillSelect = (sel, items, placeholder) => {
-            if (!sel) return;
-            sel.innerHTML = `<option value="">${placeholder}</option>`;
-            items.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name;
-                sel.appendChild(opt);
-            });
-        };
-
-        fillSelect(colSelect, dateCols, dateCols.length ? 'Выберите столбец-дату...' : 'Нет столбцов-дат');
-        fillSelect(ySelect, numericCols, numericCols.length ? 'Выберите числовой столбец...' : 'Нет числовых столбцов');
-        return;
-    }
-
-    // distribution / outliers — показываем только основной селектор со всеми столбцами.
-    if (colGroup) colGroup.style.display = '';
-    if (yGroup) yGroup.style.display = 'none';
-    if (colLabel) colLabel.textContent = 'Столбец:';
-
-    if (currentDataset && Array.isArray(currentDataset.columns)) {
-        const allCols = currentDataset.columns.map(c => c.name);
-        if (colSelect) {
-            colSelect.innerHTML = '<option value="">Выберите столбец...</option>';
-            allCols.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name;
-                colSelect.appendChild(opt);
-            });
-        }
+        if (colLabel) colLabel.textContent = 'Сумма по столбцу:';
+    } else if (vizType === 'missing') {
+        if (dateGroup) dateGroup.style.display = 'none';
+        if (colGroup) colGroup.style.display = 'none';
+        if (colLabel) colLabel.textContent = 'Столбец:';
+    } else {
+        if (dateGroup) dateGroup.style.display = 'none';
+        if (colGroup) colGroup.style.display = '';
+        if (colLabel) colLabel.textContent = 'Столбец:';
     }
 }
 
@@ -864,42 +613,43 @@ async function generateVisualization() {
         alert(dataSourceMode === 'database' ? 'Сначала подключите базу данных' : 'Сначала загрузите датасет');
         return;
     }
-    
+
     const vizType = document.getElementById('vizType').value;
     const column = document.getElementById('columnSelect').value;
-    
+
     if (vizType === 'missing') {
         await createMissingChart();
         return;
     }
 
     if (vizType === 'dynamics') {
-        const yColumn = document.getElementById('yColumnSelect').value;
-        if (!column) {
-            alert('Выберите столбец-дату для оси X');
+        const dateColEl = document.getElementById('dateColumnSelect');
+        const dateCol = dateColEl ? dateColEl.value : '';
+        if (!dateCol || dateCol === 'Выберите столбец даты...') {
+            alert('Выберите столбец с датой');
             return;
         }
-        if (!yColumn) {
-            alert('Выберите числовой столбец для оси Y');
+        if (!column || column === 'Выберите столбец...') {
+            alert('Выберите числовой столбец для суммирования');
             return;
         }
         document.getElementById('vizPlaceholder').style.display = 'none';
         try {
-            await createDynamicsChart(column, yColumn);
+            await createDynamicsChart(dateCol, column);
         } catch (error) {
-            alert('Ошибка построения динамики: ' + error.message);
+            alert('Ошибка создания визуализации: ' + error.message);
             console.error(error);
         }
         return;
     }
 
-    if (!column) {
+    if (!column || column === 'Выберите столбец...') {
         alert('Выберите столбец для визуализации');
         return;
     }
-    
+
     document.getElementById('vizPlaceholder').style.display = 'none';
-    
+
     try {
         if (vizType === 'distribution') {
             await createDistributionChartFromAPI(column);
@@ -910,64 +660,6 @@ async function generateVisualization() {
         alert('Ошибка создания визуализации: ' + error.message);
         console.error(error);
     }
-}
-
-async function createDynamicsChart(xCol, yCol) {
-    const base = `${API_BASE_URL}/api/visualization/dynamics?x=${encodeURIComponent(xCol)}&y=${encodeURIComponent(yCol)}`;
-    const url = buildTableQuery(base);
-    const response = await fetch(url);
-    if (!response.ok) {
-        const t = await response.text();
-        throw new Error(`Ошибка ${response.status}: ${t}`);
-    }
-    const json = await response.json();
-    const data = json.data || {};
-
-    if (currentChart) {
-        currentChart.destroy();
-    }
-
-    if (!Array.isArray(data.labels) || data.labels.length === 0) {
-        document.getElementById('vizPlaceholder').style.display = 'flex';
-        document.getElementById('vizPlaceholder').querySelector('p').textContent =
-            'Нет данных для построения динамики (проверь, что в столбце X есть валидные даты).';
-        return;
-    }
-
-    const granularityLabel = data.freq === 'M' ? 'по месяцам' : data.freq === 'W' ? 'по неделям' : 'по дням';
-
-    currentChart = new Chart(document.getElementById('chartCanvas'), {
-        type: 'line',
-        data: {
-            labels: data.labels,
-            datasets: [{
-                label: `Сумма ${yCol} ${granularityLabel}`,
-                data: data.values,
-                borderColor: 'rgba(79, 70, 229, 1)',
-                backgroundColor: 'rgba(79, 70, 229, 0.15)',
-                borderWidth: 2,
-                fill: true,
-                tension: 0.25,
-                pointRadius: 2,
-                pointHoverRadius: 5,
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-                legend: { display: true },
-                tooltip: { mode: 'index', intersect: false }
-            },
-            scales: {
-                x: { title: { display: true, text: xCol } },
-                y: { beginAtZero: true, title: { display: true, text: `Сумма ${yCol}` } }
-            }
-        }
-    });
-
-    document.getElementById('vizPlaceholder').style.display = 'none';
 }
 
 function buildTableQuery(initial = '') {
@@ -1212,6 +904,61 @@ async function createOutliersChart(column) {
     document.getElementById('vizPlaceholder').style.display = 'none';
 }
 
+async function createDynamicsChart(dateCol, valueCol) {
+    const url = buildTableQuery(
+        `${API_BASE_URL}/api/visualization/dynamics?date_column=${encodeURIComponent(dateCol)}&value_column=${encodeURIComponent(valueCol)}`
+    );
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Ошибка получения данных динамики');
+    }
+
+    const result = await response.json();
+    const data = result.data || { labels: [], values: [] };
+
+    if (currentChart) {
+        currentChart.destroy();
+    }
+
+    currentChart = new Chart(document.getElementById('chartCanvas'), {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: `Сумма ${valueCol} по дате (${dateCol})`,
+                data: data.values,
+                borderColor: 'rgba(79, 70, 229, 1)',
+                backgroundColor: 'rgba(79, 70, 229, 0.15)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.25,
+                pointRadius: 2,
+                pointHoverRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { display: true }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: dateCol }
+                },
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: `Сумма ${valueCol}` }
+                }
+            }
+        }
+    });
+
+    document.getElementById('vizPlaceholder').style.display = 'none';
+}
+
 function quickViz(type) {
     if (!currentDataset) {
         alert(dataSourceMode === 'database' ? 'Сначала подключите базу данных' : 'Сначала загрузите датасет');
@@ -1254,7 +1001,7 @@ function displayWarnings(warnings) {
         }
         
         if (warnings.high_cardinality_columns.length > 0) {
-            html += `<p><strong>Высокая кардинальность:</strong> ${warnings.high_cardinality_columns.join(', ')}</p>`;
+            html += `<p><strong>Высокая кардинальность (уникальность данных):</strong> ${warnings.high_cardinality_columns.join(', ')}</p>`;
         }
         
         warningsDiv.innerHTML = html;
@@ -1262,38 +1009,55 @@ function displayWarnings(warnings) {
     }
 }
 
+function isIdLikeColumn(name) {
+    const n = String(name).toLowerCase().trim();
+    if (!n) return false;
+    if (n === 'id') return true;
+    if (n.endsWith('_id') || n.endsWith('id')) {
+        if (/(^|_)id$/.test(n)) return true;
+    }
+    if (n.startsWith('id_')) return true;
+    if (/(^|_)id(_|$)/.test(n)) return true;
+    return false;
+}
+
 function displayCorrelations(correlation) {
     const container = document.querySelector('.quality-table');
-    
-    // Remove old correlations if any
+
     const oldCorr = document.getElementById('correlationsSection');
     if (oldCorr) {
         oldCorr.remove();
     }
-    
-    if (correlation.available && correlation.strong_correlations.length > 0) {
-        const corrDiv = document.createElement('div');
-        corrDiv.id = 'correlationsSection';
-        corrDiv.style.marginTop = '20px';
-        corrDiv.style.padding = '20px';
-        corrDiv.style.background = '#dbeafe';
-        corrDiv.style.borderRadius = '8px';
-        corrDiv.style.border = '2px solid #3b82f6';
-        
-        let html = '<h4 style="margin-bottom: 10px;"><i class="fas fa-link"></i> Сильные корреляции</h4>';
-        html += '<ul style="margin-left: 20px;">';
-        
-        correlation.strong_correlations.forEach(corr => {
-            const color = Math.abs(corr.correlation) > 0.9 ? '#dc2626' : '#f97316';
-            html += `<li><strong>${corr.col1}</strong> ↔ <strong>${corr.col2}</strong>: 
-                     <span style="color: ${color}; font-weight: bold;">${corr.correlation.toFixed(3)}</span>
-                     (${corr.strength})</li>`;
-        });
-        
-        html += '</ul>';
-        corrDiv.innerHTML = html;
-        container.appendChild(corrDiv);
-    }
+
+    if (!correlation.available || !correlation.strong_correlations) return;
+
+    const filtered = correlation.strong_correlations.filter(
+        c => !isIdLikeColumn(c.col1) && !isIdLikeColumn(c.col2)
+    );
+
+    if (filtered.length === 0) return;
+
+    const corrDiv = document.createElement('div');
+    corrDiv.id = 'correlationsSection';
+    corrDiv.style.marginTop = '20px';
+    corrDiv.style.padding = '20px';
+    corrDiv.style.background = '#dbeafe';
+    corrDiv.style.borderRadius = '8px';
+    corrDiv.style.border = '2px solid #3b82f6';
+
+    let html = '<h4 style="margin-bottom: 10px;"><i class="fas fa-link"></i> Сильные корреляции</h4>';
+    html += '<ul style="margin-left: 20px;">';
+
+    filtered.forEach(corr => {
+        const color = Math.abs(corr.correlation) > 0.9 ? '#dc2626' : '#f97316';
+        html += `<li><strong>${corr.col1}</strong> ↔ <strong>${corr.col2}</strong>: 
+                 <span style="color: ${color}; font-weight: bold;">${corr.correlation.toFixed(3)}</span>
+                 (${corr.strength})</li>`;
+    });
+
+    html += '</ul>';
+    corrDiv.innerHTML = html;
+    container.appendChild(corrDiv);
 }
 
 function displayMissingPatterns(patterns) {
@@ -1391,6 +1155,189 @@ function hideLoadingState() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Чаты: множественные диалоги, привязанные к текущему источнику данных
+// ---------------------------------------------------------------------------
+
+async function refreshSourceAndChats() {
+    try {
+        const sourceResp = await fetch(`${API_BASE_URL}/api/source`);
+        if (sourceResp.ok) {
+            const info = await sourceResp.json();
+            currentSourceId = info.source_id || null;
+        }
+    } catch (e) {
+        console.warn('Не удалось получить source_id', e);
+    }
+    await loadChats();
+    if (chatsCache.length === 0) {
+        await createNewChat({ silent: true });
+    } else {
+        await selectChat(chatsCache[0].id);
+    }
+}
+
+async function loadChats() {
+    if (!currentSourceId) {
+        chatsCache = [];
+        renderChatList();
+        return;
+    }
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats?source_id=${encodeURIComponent(currentSourceId)}`);
+        if (!resp.ok) throw new Error('Не удалось загрузить чаты');
+        const data = await resp.json();
+        chatsCache = data.chats || [];
+        renderChatList();
+    } catch (e) {
+        console.error(e);
+        chatsCache = [];
+        renderChatList();
+    }
+}
+
+function renderChatList() {
+    const listEl = document.getElementById('chatList');
+    if (!listEl) return;
+
+    if (!chatsCache || chatsCache.length === 0) {
+        listEl.innerHTML = '<div class="chat-list-empty">Нет сохранённых чатов</div>';
+        updateCurrentChatLabel();
+        return;
+    }
+
+    listEl.innerHTML = '';
+    chatsCache.forEach(chat => {
+        const item = document.createElement('div');
+        item.className = 'chat-list-item' + (chat.id === currentChatId ? ' active' : '');
+        item.title = `${chat.name} (сообщений: ${chat.messages_count || 0})`;
+        item.innerHTML = `
+            <span class="chat-list-item-name">${escapeHtml(chat.name)}</span>
+            <button class="chat-list-item-action" title="Переименовать"><i class="fas fa-pen"></i></button>
+            <button class="chat-list-item-action" title="Удалить"><i class="fas fa-trash"></i></button>
+        `;
+        const [renameBtn, deleteBtn] = item.querySelectorAll('.chat-list-item-action');
+        renameBtn.addEventListener('click', (e) => { e.stopPropagation(); renameChat(chat.id); });
+        deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteChat(chat.id); });
+        item.addEventListener('click', () => selectChat(chat.id));
+        listEl.appendChild(item);
+    });
+
+    updateCurrentChatLabel();
+}
+
+function updateCurrentChatLabel() {
+    const el = document.getElementById('chatCurrentName');
+    if (!el) return;
+    const current = chatsCache.find(c => c.id === currentChatId);
+    el.textContent = current ? current.name : '';
+}
+
+async function createNewChat(opts = {}) {
+    if (!currentSourceId) {
+        if (!opts.silent) alert('Сначала загрузите данные');
+        return;
+    }
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_id: currentSourceId, name: 'Новый чат' })
+        });
+        if (!resp.ok) throw new Error('Не удалось создать чат');
+        const data = await resp.json();
+        await loadChats();
+        await selectChat(data.chat.id);
+    } catch (e) {
+        console.error(e);
+        if (!opts.silent) alert('Ошибка создания чата: ' + e.message);
+    }
+}
+
+async function renameChat(chatId) {
+    const chat = chatsCache.find(c => c.id === chatId);
+    const oldName = chat ? chat.name : '';
+    const newName = prompt('Новое название чата:', oldName);
+    if (!newName || newName.trim() === '' || newName === oldName) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newName.trim() })
+        });
+        if (!resp.ok) throw new Error('Не удалось переименовать');
+        await loadChats();
+    } catch (e) {
+        console.error(e);
+        alert('Ошибка переименования: ' + e.message);
+    }
+}
+
+async function deleteChat(chatId) {
+    const chat = chatsCache.find(c => c.id === chatId);
+    if (!confirm(`Удалить чат «${chat ? chat.name : chatId}»? Это действие необратимо.`)) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+            method: 'DELETE'
+        });
+        if (!resp.ok) throw new Error('Не удалось удалить');
+        if (currentChatId === chatId) {
+            currentChatId = null;
+        }
+        await loadChats();
+        if (chatsCache.length > 0) {
+            await selectChat(chatsCache[0].id);
+        } else {
+            await createNewChat({ silent: true });
+        }
+    } catch (e) {
+        console.error(e);
+        alert('Ошибка удаления: ' + e.message);
+    }
+}
+
+async function selectChat(chatId) {
+    if (!chatId) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`);
+        if (!resp.ok) throw new Error('Не удалось загрузить чат');
+        const data = await resp.json();
+        currentChatId = chatId;
+        renderChatHistory(data.chat.history || []);
+        renderChatList();
+    } catch (e) {
+        console.error(e);
+        alert('Ошибка загрузки чата: ' + e.message);
+    }
+}
+
+function renderChatHistory(history) {
+    const messagesContainer = document.getElementById('chatMessages');
+    if (!messagesContainer) return;
+    messagesContainer.innerHTML = '';
+
+    const greetingHtml = `
+        <div class="chat-message assistant" id="chatGreeting">
+            <div class="message-avatar">
+                <i class="fas fa-robot" style="color:#3b82f6;"></i>
+            </div>
+            <div class="message-content">
+                <p id="chatGreetingText">Новый диалог. Задайте вопрос на основе текущих данных.</p>
+            </div>
+        </div>
+    `;
+    messagesContainer.innerHTML = greetingHtml;
+
+    history.forEach(msg => {
+        const role = msg.role;
+        if (role === 'user' || role === 'assistant') {
+            const content = (msg.content || '').toString();
+            if (!content.trim()) return;
+            addChatMessage(content, role);
+        }
+    });
+}
+
 // Chat functionality
 async function sendMessage() {
     const input = document.getElementById('chatInput');
@@ -1404,43 +1351,26 @@ async function sendMessage() {
         return;
     }
 
-    // Если у пользователя ещё нет активного чата — создаём первый автоматически.
     if (!currentChatId) {
-        try {
-            const created = await fetch(`${API_BASE_URL}/api/chats`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({})
-            });
-            if (!created.ok) {
-                const t = await created.text();
-                throw new Error(`${created.status}: ${t}`);
-            }
-            const data = await created.json();
-            currentChatId = data.chat.id;
-            await loadChatList();
-        } catch (err) {
-            alert('Не удалось создать чат: ' + err.message);
+        await createNewChat({ silent: true });
+        if (!currentChatId) {
+            alert('Не удалось создать чат');
             return;
         }
     }
-
-    // Если в окне ещё стандартное приветствие — почистим, чтобы было видно только сообщения чата.
-    const greeting = document.getElementById('chatGreeting');
-    if (greeting && greeting.parentElement) greeting.parentElement.removeChild(greeting);
 
     addChatMessage(message, 'user');
     input.value = '';
     input.disabled = true;
     if (sendBtn) sendBtn.disabled = true;
 
-    const thinkingEl = addChatMessage('Настя думает...', 'assistant', { ephemeral: true });
+    const thinkingEl = addChatMessage('Анализирую данные...', 'assistant', { ephemeral: true });
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(currentChatId)}/message`, {
+        const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message })
+            body: JSON.stringify({ message, chat_id: currentChatId })
         });
 
         if (!response.ok) {
@@ -1455,9 +1385,6 @@ async function sendMessage() {
             renderAgentTrace(data.trace);
         }
         addChatMessage(data.reply || '(пустой ответ)', 'assistant');
-
-        // Подтягиваем обновлённый список (имя чата мог автопереименоваться).
-        loadChatList().catch(() => {});
     } catch (err) {
         if (thinkingEl && thinkingEl.remove) thinkingEl.remove();
         addChatMessage('Упс, что-то пошло не так: ' + err.message, 'assistant');
@@ -1466,6 +1393,7 @@ async function sendMessage() {
         input.disabled = false;
         if (sendBtn) sendBtn.disabled = false;
         input.focus();
+        loadChats().catch(() => {});
     }
 }
 
@@ -1478,7 +1406,7 @@ function renderAgentTrace(trace) {
         <div class="message-content">
             <details>
                 <summary style="cursor:pointer; color:#64748b;">
-                    Настя запустила ${trace.length} инструмент(а/ов) — показать
+                    Ассистент запустил ${trace.length} инструмент(а/ов) — показать
                 </summary>
                 <div class="trace-body"></div>
             </details>
@@ -1544,7 +1472,7 @@ function addChatMessage(message, sender, options = {}) {
     if (options.ephemeral) messageDiv.dataset.ephemeral = '1';
 
     const avatar = sender === 'assistant'
-        ? '<i class="fas fa-heart" style="color:#ec4899;"></i>'
+        ? '<i class="fas fa-robot" style="color:#3b82f6;"></i>'
         : '<i class="fas fa-user"></i>';
 
     const renderMd = sender === 'assistant' && !options.ephemeral;
@@ -1734,12 +1662,17 @@ function getSimulatedResponse(message) {
 // Parse CSV function removed
 
 // ---------------------------------------------------------------------------
-// Support modal
+// Поддержка: модалка с формой -> POST /api/support
 // ---------------------------------------------------------------------------
 
-function openSupportModal() {
+function openSupport() {
     const modal = document.getElementById('supportModal');
     if (!modal) return;
+    const status = document.getElementById('supportStatus');
+    if (status) {
+        status.textContent = '';
+        status.className = 'modal-status';
+    }
     modal.style.display = 'flex';
     setTimeout(() => {
         const subj = document.getElementById('supportSubject');
@@ -1747,15 +1680,14 @@ function openSupportModal() {
     }, 50);
 }
 
-function closeSupportModal() {
+function closeSupport() {
     const modal = document.getElementById('supportModal');
-    if (!modal) return;
-    modal.style.display = 'none';
+    if (modal) modal.style.display = 'none';
 }
 
 function onSupportOverlayClick(event) {
-    if (event.target && event.target.id === 'supportModal') {
-        closeSupportModal();
+    if (event && event.target && event.target.id === 'supportModal') {
+        closeSupport();
     }
 }
 
@@ -1763,34 +1695,56 @@ async function submitSupport() {
     const subject = (document.getElementById('supportSubject').value || '').trim();
     const description = (document.getElementById('supportDescription').value || '').trim();
     const email = (document.getElementById('supportEmail').value || '').trim();
+    const status = document.getElementById('supportStatus');
+    const submitBtn = document.getElementById('supportSubmitBtn');
 
     if (!subject || !description) {
-        alert('Заполните тему и описание.');
+        if (status) {
+            status.textContent = 'Заполните тему и описание.';
+            status.className = 'modal-status error';
+        }
         return;
     }
 
-    const submitBtn = document.querySelector('#supportForm button[type="submit"]');
+    if (status) {
+        status.textContent = 'Отправка...';
+        status.className = 'modal-status';
+    }
     if (submitBtn) submitBtn.disabled = true;
 
     try {
         const resp = await fetch(`${API_BASE_URL}/api/support`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject, description, email })
+            body: JSON.stringify({ subject, description, email: email || null })
         });
         if (!resp.ok) {
-            const t = await resp.text();
-            throw new Error(`${resp.status}: ${t}`);
+            const text = await resp.text();
+            throw new Error(text || `HTTP ${resp.status}`);
         }
-        alert('Спасибо! Ваше обращение принято.');
+        if (status) {
+            status.textContent = 'Спасибо! Обращение отправлено.';
+            status.className = 'modal-status success';
+        }
         document.getElementById('supportForm').reset();
-        closeSupportModal();
-    } catch (err) {
-        alert('Не удалось отправить обращение: ' + err.message);
+        setTimeout(closeSupport, 1500);
+    } catch (e) {
+        console.error(e);
+        if (status) {
+            status.textContent = 'Ошибка отправки: ' + e.message;
+            status.className = 'modal-status error';
+        }
     } finally {
         if (submitBtn) submitBtn.disabled = false;
     }
 }
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('supportModal');
+        if (modal && modal.style.display !== 'none') closeSupport();
+    }
+});
 
 // Initialization message
 console.log('Dataset Analyzer initialized! 🚀');

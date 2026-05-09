@@ -34,8 +34,12 @@ t-analyze.zip
 *.zip
 
 # Local test data
-"БД инвест.xlsx"
+*.xlsx
+*.xls
 
-# Runtime state
+# Runtime data created by backend at runtime
 chats.json
-support.log
+support.json
+
+# Local macOS venv
+venv_mac/

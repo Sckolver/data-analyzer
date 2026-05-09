@@ -12,11 +12,11 @@
         <!-- Header -->
         <header class="header">
             <div class="header-content">
-                <h1>T-Analyze</h1>
-                <p class="subtitle">Анализ данных с AI и автоматическими метриками</p>
+                <h1>AI Platform T-Invest</h1>
+                <p class="subtitle">Интеллектуальная платформа для анализа данных в сфере инвестиций</p>
             </div>
             <div class="header-actions">
-                <button class="btn-support" onclick="openSupportModal()" title="Поддержка">
+                <button class="btn-support" onclick="openSupport()" title="Связаться с поддержкой">
                     <i class="fas fa-life-ring"></i>
                     <span>Поддержка</span>
                 </button>
@@ -26,37 +26,6 @@
                 </button>
             </div>
         </header>
-
-        <!-- Support modal -->
-        <div class="modal-overlay" id="supportModal" style="display: none;" onclick="onSupportOverlayClick(event)">
-            <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="supportTitle">
-                <button class="modal-close" onclick="closeSupportModal()" aria-label="Закрыть">
-                    <i class="fas fa-times"></i>
-                </button>
-                <h3 id="supportTitle"><i class="fas fa-life-ring"></i> Связаться с поддержкой</h3>
-                <p class="modal-subtitle">Опишите проблему — мы передадим её команде.</p>
-                <form id="supportForm" onsubmit="event.preventDefault(); submitSupport();">
-                    <div class="form-row">
-                        <label for="supportSubject">Тема</label>
-                        <input type="text" id="supportSubject" required maxlength="200" placeholder="Например: не подключается БД">
-                    </div>
-                    <div class="form-row">
-                        <label for="supportDescription">Описание</label>
-                        <textarea id="supportDescription" required rows="5" placeholder="Что произошло? Что вы ожидали? Что увидели?"></textarea>
-                    </div>
-                    <div class="form-row">
-                        <label for="supportEmail">Email для ответа (необязательно)</label>
-                        <input type="email" id="supportEmail" placeholder="you@example.com">
-                    </div>
-                    <div class="modal-actions">
-                        <button type="button" class="btn-secondary" onclick="closeSupportModal()">Отмена</button>
-                        <button type="submit" class="btn-primary">
-                            <i class="fas fa-paper-plane"></i> Отправить
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
 
         <!-- Source Selection -->
         <section class="source-section" id="sourceSection">
@@ -173,30 +142,30 @@
                     </div>
                 </div>
 
-                <!-- DB-only: метаданные источника по выбранной таблице -->
-                <div class="info-grid db-meta-grid" id="dbMetaGrid" style="display: none;">
-                    <div class="info-card meta-card">
-                        <span class="info-label"><i class="fas fa-user-tie"></i> Владелец данных</span>
-                        <span class="meta-value" id="dbOwner">—</span>
-                    </div>
-                    <div class="info-card meta-card">
-                        <span class="info-label"><i class="fas fa-bullseye"></i> Назначение</span>
-                        <span class="meta-value" id="dbPurpose">—</span>
-                    </div>
-                    <div class="info-card meta-card">
-                        <span class="info-label"><i class="fas fa-clock"></i> Частота обновления</span>
-                        <span class="meta-value" id="dbFrequency">—</span>
-                    </div>
-                    <div class="info-card meta-card">
-                        <span class="info-label"><i class="fas fa-shield-halved"></i> Уровень чувствительности</span>
-                        <span class="meta-value" id="dbSensitivity">—</span>
-                    </div>
-                </div>
-
                 <!-- Table picker (только в DB-режиме) -->
                 <div class="table-picker" id="tablePickerRow" style="display: none;">
                     <label for="tablePicker"><i class="fas fa-table"></i> Таблица:</label>
                     <select id="tablePicker" onchange="onTableChange(this.value)"></select>
+                </div>
+
+                <h4 class="meta-grid-title"><i class="fas fa-id-card"></i> Метаданные источника</h4>
+                <div class="info-grid info-grid-meta" id="datasetMetaInfo">
+                    <div class="info-card info-card--meta">
+                        <span class="info-label"><i class="fas fa-user-tie"></i> Владелец</span>
+                        <span class="info-value-meta" id="metaOwner">Анастасия Князева</span>
+                    </div>
+                    <div class="info-card info-card--meta">
+                        <span class="info-label"><i class="fas fa-bullseye"></i> Назначение</span>
+                        <span class="info-value-meta" id="metaPurpose">Аналитика инвестиционных операций</span>
+                    </div>
+                    <div class="info-card info-card--meta">
+                        <span class="info-label"><i class="fas fa-sync-alt"></i> Частота обновления</span>
+                        <span class="info-value-meta" id="metaUpdate">Обновлено сегодня 09:00</span>
+                    </div>
+                    <div class="info-card info-card--meta">
+                        <span class="info-label"><i class="fas fa-shield-alt"></i> Чувствительность</span>
+                        <span class="info-value-meta" id="metaSensitivity">Конфиденциально</span>
+                    </div>
                 </div>
             </div>
 
@@ -306,21 +275,21 @@
                                 <option value="distribution">Распределение</option>
                                 <option value="missing">Карта пропусков</option>
                                 <option value="outliers">Выбросы</option>
-                                <option value="dynamics">Динамика во времени</option>
+                                <option value="dynamics">Динамика (по дате)</option>
                             </select>
                         </div>
-                        
+
+                        <div class="control-group" id="dateColumnGroup" style="display: none;">
+                            <label for="dateColumnSelect">Дата:</label>
+                            <select id="dateColumnSelect">
+                                <option>Выберите столбец даты...</option>
+                            </select>
+                        </div>
+
                         <div class="control-group" id="columnSelectGroup">
                             <label for="columnSelect" id="columnSelectLabel">Столбец:</label>
                             <select id="columnSelect">
                                 <option>Выберите столбец...</option>
-                            </select>
-                        </div>
-
-                        <div class="control-group" id="yColumnGroup" style="display: none;">
-                            <label for="yColumnSelect">Столбец Y (сумма):</label>
-                            <select id="yColumnSelect">
-                                <option>Выберите числовой столбец...</option>
                             </select>
                         </div>
 
@@ -337,35 +306,19 @@
                         </div>
                     </div>
 
-                    <div class="viz-grid">
-                        <div class="viz-card">
-                            <h4>Быстрые визуализации</h4>
-                            <div class="quick-viz-buttons">
-                                <button class="btn-secondary" onclick="quickViz('types')">
-                                    <i class="fas fa-table"></i> Типы столбцов
-                                </button>
-                                <button class="btn-secondary" onclick="quickViz('missing')">
-                                    <i class="fas fa-exclamation-circle"></i> Пропуски
-                                </button>
-                                <button class="btn-secondary" onclick="quickViz('stats')">
-                                    <i class="fas fa-calculator"></i> Статистика
-                                </button>
-                            </div>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- AI Chat Tab -->
                 <div class="tab-pane" id="chat">
-                    <h2>Настя — AI ассистент для анализа данных ✿</h2>
+                    <h2>AI-ассистент для анализа данных</h2>
 
                     <div class="chat-layout">
-                        <aside class="chat-sidebar" id="chatSidebar">
+                        <aside class="chat-sidebar">
                             <button class="btn-new-chat" onclick="createNewChat()">
                                 <i class="fas fa-plus"></i> Новый чат
                             </button>
                             <div class="chat-list" id="chatList">
-                                <div class="chat-list-empty">Здесь появятся ваши диалоги.</div>
+                                <div class="chat-list-empty">Нет сохранённых чатов</div>
                             </div>
                         </aside>
 
@@ -373,10 +326,10 @@
                             <div class="chat-messages" id="chatMessages">
                                 <div class="chat-message assistant" id="chatGreeting">
                                     <div class="message-avatar">
-                                        <i class="fas fa-heart" style="color:#ec4899;"></i>
+                                        <i class="fas fa-robot" style="color:#3b82f6;"></i>
                                     </div>
                                     <div class="message-content">
-                                        <p id="chatGreetingText">Приветик! Я Настя ✿ Загружай датасет и спрашивай что угодно — я посмотрю сама через SQL и pandas и всё тебе расскажу ☺️</p>
+                                        <p id="chatGreetingText">Привет! Я — AI-ассистент по анализу данных в сфере инвестиций. Задавай вопрос на основе текущих данных.</p>
                                         <div class="suggestions">
                                             <p><strong>Например, можно спросить:</strong></p>
                                             <button class="suggestion-btn" onclick="sendSuggestion(this)">
@@ -398,9 +351,9 @@
 
                             <div class="chat-input-container">
                                 <div class="chat-input-wrapper">
-                                    <input 
-                                        type="text" 
-                                        id="chatInput" 
+                                    <input
+                                        type="text"
+                                        id="chatInput"
                                         placeholder="Задайте вопрос о датасете..."
                                         onkeypress="handleChatKeypress(event)"
                                     >
@@ -420,6 +373,39 @@
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- Support modal -->
+    <div class="modal-overlay" id="supportModal" style="display: none;" onclick="onSupportOverlayClick(event)">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="supportTitle">
+            <button class="modal-close" onclick="closeSupport()" aria-label="Закрыть">
+                <i class="fas fa-times"></i>
+            </button>
+            <h3 id="supportTitle"><i class="fas fa-life-ring"></i> Связаться с поддержкой</h3>
+            <p class="modal-subtitle">Опишите проблему — мы свяжемся с вами по указанному e-mail.</p>
+
+            <form id="supportForm" onsubmit="event.preventDefault(); submitSupport();">
+                <div class="form-row">
+                    <label for="supportSubject">Тема</label>
+                    <input type="text" id="supportSubject" required maxlength="200" placeholder="Кратко опишите проблему">
+                </div>
+                <div class="form-row">
+                    <label for="supportDescription">Описание</label>
+                    <textarea id="supportDescription" rows="5" required maxlength="4000" placeholder="Что произошло, что вы ожидали увидеть, шаги воспроизведения..."></textarea>
+                </div>
+                <div class="form-row">
+                    <label for="supportEmail">E-mail для связи (необязательно)</label>
+                    <input type="email" id="supportEmail" placeholder="you@example.com">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" onclick="closeSupport()">Отмена</button>
+                    <button type="submit" class="btn-primary" id="supportSubmitBtn">
+                        <i class="fas fa-paper-plane"></i> Отправить
+                    </button>
+                </div>
+                <div class="modal-status" id="supportStatus"></div>
+            </form>
+        </div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>

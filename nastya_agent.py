@@ -206,6 +206,15 @@ class NastyaAgent:
         self.history = []
         self._refresh_system_prompt()
 
+    def set_history(self, messages: List[Dict[str, Any]]) -> None:
+        """Подменяет историю диалога (используется при работе с многочатами)."""
+        self.history = list(messages or [])
+        self._refresh_system_prompt()
+
+    def get_history(self) -> List[Dict[str, Any]]:
+        """Возвращает копию текущей истории."""
+        return list(self.history)
+
     # ------------------------------------------------------------------
     def _call_openrouter(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         api_key = os.getenv("OPENROUTER_KEY") or os.getenv("OPENROUTER_API_KEY")

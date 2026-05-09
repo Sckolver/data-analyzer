@@ -35,3 +35,7 @@ t-analyze.zip
 
 # Local test data
 "БД инвест.xlsx"
+
+# Runtime state
+chats.json
+support.log

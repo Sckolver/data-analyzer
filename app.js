@@ -5,7 +5,44 @@ let dataSourceMode = null;       // 'dataset' | 'database'
 let currentTableName = null;     // имя выбранной таблицы в режиме database
 let dbTables = [];               // список таблиц БД (meta)
 let dbMeta = {};                 // { dialect, dbname }
+let chatList = [];               // [{id, name, updated_at, messages_count}]
+let currentChatId = null;        // активный чат
 const API_BASE_URL = 'http://localhost:8765';
+
+// Метаданные источников (для demo-БД investment_department_db).
+// Если таблицы здесь нет — карточки показывают «—».
+const DB_METADATA = {
+    clients: {
+        owner: 'Команда CRM (Анна Соколова)',
+        purpose: 'Профили клиентов, риск-профиль, контакты',
+        frequency: 'Ежедневно (ночной ETL)',
+        sensitivity: 'Высокая — PII (имя, email)'
+    },
+    accounts: {
+        owner: 'Брокерский back-office',
+        purpose: 'Счета клиентов, балансы, статусы',
+        frequency: 'Каждые 15 минут',
+        sensitivity: 'Высокая — финансовые данные'
+    },
+    instruments: {
+        owner: 'Команда инструментов / Reference Data',
+        purpose: 'Справочник торговых инструментов',
+        frequency: 'Ежедневно после закрытия рынка',
+        sensitivity: 'Низкая — публичные справочные данные'
+    },
+    trades: {
+        owner: 'Trading Desk',
+        purpose: 'Журнал всех сделок клиентов',
+        frequency: 'Real-time (стриминг из биржи)',
+        sensitivity: 'Средняя — операционные данные клиентов'
+    },
+    cash_transactions: {
+        owner: 'Operations / Treasury',
+        purpose: 'Денежные операции по счетам (ввод/вывод/комиссии)',
+        frequency: 'Каждый час',
+        sensitivity: 'Высокая — финансовые транзакции'
+    }
+};
 
 // Initialize event listeners
 document.addEventListener('DOMContentLoaded', () => {
@@ -30,6 +67,10 @@ function initializeEventListeners() {
     uploadArea.addEventListener('dragover', handleDragOver);
     uploadArea.addEventListener('drop', handleDrop);
     uploadArea.addEventListener('dragleave', handleDragLeave);
+
+    // Тип визуализации — переключаем видимость полей под него.
+    const vizTypeEl = document.getElementById('vizType');
+    if (vizTypeEl) vizTypeEl.addEventListener('change', onVizTypeChange);
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +101,8 @@ function goHome() {
     currentTableName = null;
     dbTables = [];
     dbMeta = {};
+    chatList = [];
+    currentChatId = null;
     if (currentChart) {
         try { currentChart.destroy(); } catch (_) {}
         currentChart = null;
@@ -183,9 +226,12 @@ async function processFile(file) {
         currentTableName = null;
         dbTables = [];
         dbMeta = {};
+        chatList = [];
+        currentChatId = null;
         applyModeLabels('dataset');
 
         await loadAnalysis({ file, displaySize: null });
+        await loadChatList();
         hideLoadingState();
         
     } catch (error) {
@@ -244,9 +290,12 @@ async function connectDatabase() {
         }
 
         applyModeLabels('database');
+        chatList = [];
+        currentChatId = null;
 
         showLoadingState('Анализ данных...');
         await loadAnalysis({ fileLike: { name: dbMeta.dbname }, displaySize: null });
+        await loadChatList();
         hideLoadingState();
     } catch (err) {
         hideLoadingState();
@@ -305,6 +354,7 @@ async function onTableChange(newTable) {
     const vizPicker = document.getElementById('vizTablePicker');
     if (mainPicker && mainPicker.value !== newTable) mainPicker.value = newTable;
     if (vizPicker && vizPicker.value !== newTable) vizPicker.value = newTable;
+    renderDbMetadata(newTable);
 
     showLoadingState(`Анализ таблицы «${newTable}»...`);
     try {
@@ -332,6 +382,28 @@ function applyModeLabels(mode) {
             ? 'Приветик! Я Настя ✿ Подключи БД и спрашивай про таблицы и связи — я сама схожу в SQL/pandas и всё расскажу ☺️'
             : 'Приветик! Я Настя ✿ Загружай датасет и спрашивай что угодно — я посмотрю сама через SQL и pandas и всё тебе расскажу ☺️';
     }
+
+    const dbMetaGrid = document.getElementById('dbMetaGrid');
+    if (dbMetaGrid) dbMetaGrid.style.display = isDb ? 'grid' : 'none';
+}
+
+function renderDbMetadata(tableName) {
+    const grid = document.getElementById('dbMetaGrid');
+    if (!grid) return;
+    if (dataSourceMode !== 'database') {
+        grid.style.display = 'none';
+        return;
+    }
+    grid.style.display = 'grid';
+    const meta = (tableName && DB_METADATA[tableName]) || {};
+    const set = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = (val && String(val).trim()) || '—';
+    };
+    set('dbOwner', meta.owner);
+    set('dbPurpose', meta.purpose);
+    set('dbFrequency', meta.frequency);
+    set('dbSensitivity', meta.sensitivity);
 }
 
 function parseCSV(text) {
@@ -359,6 +431,8 @@ function removeFile() {
     currentTableName = null;
     dbTables = [];
     dbMeta = {};
+    chatList = [];
+    currentChatId = null;
     document.getElementById('fileInput').value = '';
     document.getElementById('fileInfo').style.display = 'none';
     document.getElementById('mainContent').style.display = 'none';
@@ -399,6 +473,9 @@ function displayDatasetFromBackend(file, analysisData) {
     // Убедимся, что таблица-пикеры актуальны (в DB-режиме).
     if (dataSourceMode === 'database') {
         renderTablePickers();
+        renderDbMetadata(currentTableName);
+    } else {
+        renderDbMetadata(null);
     }
     
     // Scroll to content
@@ -506,19 +583,280 @@ function switchTab(tabName) {
         pane.classList.remove('active');
     });
     document.getElementById(tabName).classList.add('active');
+
+    if (tabName === 'chat') {
+        loadChatList().catch(err => console.error('chats load failed:', err));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-chat sidebar
+// ---------------------------------------------------------------------------
+
+async function loadChatList() {
+    if (!currentDataset) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats`);
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`${resp.status}: ${t}`);
+        }
+        const data = await resp.json();
+        chatList = data.chats || [];
+        renderChatList();
+    } catch (err) {
+        console.error('Не удалось получить список чатов:', err);
+    }
+}
+
+function renderChatList() {
+    const container = document.getElementById('chatList');
+    if (!container) return;
+    if (!chatList.length) {
+        container.innerHTML = '<div class="chat-list-empty">Нажмите «+ Новый чат», чтобы начать.</div>';
+        updateCurrentChatName();
+        return;
+    }
+    container.innerHTML = '';
+    chatList.forEach(chat => {
+        const item = document.createElement('div');
+        item.className = 'chat-list-item' + (chat.id === currentChatId ? ' active' : '');
+        item.title = chat.name;
+        item.innerHTML = `
+            <span class="chat-list-item-name">${escapeHtml(chat.name)}</span>
+            <span class="chat-list-item-actions">
+                <button title="Переименовать" data-action="rename"><i class="fas fa-pen"></i></button>
+                <button title="Удалить" class="danger" data-action="delete"><i class="fas fa-trash"></i></button>
+            </span>
+        `;
+        item.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('button[data-action]');
+            if (btn) {
+                ev.stopPropagation();
+                if (btn.dataset.action === 'rename') return renameChat(chat.id);
+                if (btn.dataset.action === 'delete') return deleteChat(chat.id);
+                return;
+            }
+            selectChat(chat.id);
+        });
+        container.appendChild(item);
+    });
+    updateCurrentChatName();
+}
+
+function updateCurrentChatName() {
+    const el = document.getElementById('chatCurrentName');
+    if (!el) return;
+    if (!currentChatId) {
+        el.textContent = '';
+        return;
+    }
+    const chat = chatList.find(c => c.id === currentChatId);
+    el.textContent = chat ? `Чат: ${chat.name}` : '';
+}
+
+async function createNewChat() {
+    if (!currentDataset) {
+        alert(dataSourceMode === 'database' ? 'Сначала подключите базу данных' : 'Сначала загрузите датасет');
+        return;
+    }
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`${resp.status}: ${t}`);
+        }
+        const data = await resp.json();
+        currentChatId = data.chat.id;
+        await loadChatList();
+        clearChatMessages();
+    } catch (err) {
+        alert('Не удалось создать чат: ' + err.message);
+    }
+}
+
+async function selectChat(chatId) {
+    if (!chatId || chatId === currentChatId) return;
+    currentChatId = chatId;
+    renderChatList();
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`);
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`${resp.status}: ${t}`);
+        }
+        const data = await resp.json();
+        renderChatHistory(data.chat?.messages || []);
+    } catch (err) {
+        alert('Не удалось загрузить чат: ' + err.message);
+    }
+}
+
+async function renameChat(chatId) {
+    const chat = chatList.find(c => c.id === chatId);
+    const current = chat?.name || '';
+    const next = prompt('Новое название чата:', current);
+    if (next === null) return;
+    const trimmed = next.trim();
+    if (!trimmed || trimmed === current) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: trimmed })
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`${resp.status}: ${t}`);
+        }
+        await loadChatList();
+    } catch (err) {
+        alert('Не удалось переименовать: ' + err.message);
+    }
+}
+
+async function deleteChat(chatId) {
+    if (!confirm('Удалить этот чат? Историю восстановить не получится.')) return;
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(chatId)}`, {
+            method: 'DELETE'
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`${resp.status}: ${t}`);
+        }
+        if (currentChatId === chatId) {
+            currentChatId = null;
+            clearChatMessages();
+        }
+        await loadChatList();
+    } catch (err) {
+        alert('Не удалось удалить: ' + err.message);
+    }
+}
+
+function clearChatMessages() {
+    const messages = document.getElementById('chatMessages');
+    if (!messages) return;
+    messages.innerHTML = '';
+    const greeting = document.createElement('div');
+    greeting.className = 'chat-message assistant';
+    const text = dataSourceMode === 'database'
+        ? 'Приветик! Я Настя ✿ Это новый чат — спрашивай что угодно про подключённую БД ☺️'
+        : 'Приветик! Я Настя ✿ Это новый чат — спрашивай что угодно про загруженный датасет ☺️';
+    greeting.innerHTML = `
+        <div class="message-avatar"><i class="fas fa-heart" style="color:#ec4899;"></i></div>
+        <div class="message-content"><p>${escapeHtml(text)}</p></div>
+    `;
+    messages.appendChild(greeting);
+}
+
+function renderChatHistory(messages) {
+    const container = document.getElementById('chatMessages');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!messages.length) {
+        clearChatMessages();
+        return;
+    }
+    messages.forEach(m => {
+        addChatMessage(m.content || '', m.role === 'user' ? 'user' : 'assistant');
+    });
 }
 
 // Visualization
 function populateColumnSelect(columns) {
+    // columns теперь — массив имён, но колонки с типами берём из currentDataset.columns.
     const select = document.getElementById('columnSelect');
-    select.innerHTML = '<option>Выберите столбец...</option>';
-    
+    select.innerHTML = '<option value="">Выберите столбец...</option>';
+
     columns.forEach(col => {
         const option = document.createElement('option');
         option.value = col;
         option.textContent = col;
         select.appendChild(option);
     });
+
+    // Y-селектор перезаполняется при смене типа визуализации (зависит от того, что нужно).
+    onVizTypeChange();
+}
+
+function _columnsByPredicate(predicate) {
+    if (!currentDataset || !Array.isArray(currentDataset.columns)) return [];
+    return currentDataset.columns.filter(predicate).map(c => c.name);
+}
+
+function _isDateColumn(col) {
+    if (!col) return false;
+    if (col.type === 'datetime') return true;
+    // Эвристика: имя колонки выглядит как дата.
+    const name = (col.name || '').toLowerCase();
+    return /(^|_)(date|dt|day|month|year|created|updated|opened|closed|at)($|_)/.test(name);
+}
+
+function _isNumericColumn(col) {
+    return col && (col.type === 'numeric' || col.type === 'binary');
+}
+
+function onVizTypeChange() {
+    const vizType = document.getElementById('vizType').value;
+    const colGroup = document.getElementById('columnSelectGroup');
+    const colLabel = document.getElementById('columnSelectLabel');
+    const colSelect = document.getElementById('columnSelect');
+    const yGroup = document.getElementById('yColumnGroup');
+    const ySelect = document.getElementById('yColumnSelect');
+
+    if (vizType === 'missing') {
+        if (colGroup) colGroup.style.display = 'none';
+        if (yGroup) yGroup.style.display = 'none';
+        return;
+    }
+
+    if (vizType === 'dynamics') {
+        if (colGroup) colGroup.style.display = '';
+        if (yGroup) yGroup.style.display = '';
+        if (colLabel) colLabel.textContent = 'Столбец X (дата):';
+
+        const dateCols = _columnsByPredicate(_isDateColumn);
+        const numericCols = _columnsByPredicate(_isNumericColumn);
+
+        const fillSelect = (sel, items, placeholder) => {
+            if (!sel) return;
+            sel.innerHTML = `<option value="">${placeholder}</option>`;
+            items.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                sel.appendChild(opt);
+            });
+        };
+
+        fillSelect(colSelect, dateCols, dateCols.length ? 'Выберите столбец-дату...' : 'Нет столбцов-дат');
+        fillSelect(ySelect, numericCols, numericCols.length ? 'Выберите числовой столбец...' : 'Нет числовых столбцов');
+        return;
+    }
+
+    // distribution / outliers — показываем только основной селектор со всеми столбцами.
+    if (colGroup) colGroup.style.display = '';
+    if (yGroup) yGroup.style.display = 'none';
+    if (colLabel) colLabel.textContent = 'Столбец:';
+
+    if (currentDataset && Array.isArray(currentDataset.columns)) {
+        const allCols = currentDataset.columns.map(c => c.name);
+        if (colSelect) {
+            colSelect.innerHTML = '<option value="">Выберите столбец...</option>';
+            allCols.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                colSelect.appendChild(opt);
+            });
+        }
+    }
 }
 
 async function generateVisualization() {
@@ -534,8 +872,28 @@ async function generateVisualization() {
         await createMissingChart();
         return;
     }
-    
-    if (!column || column === 'Выберите столбец...') {
+
+    if (vizType === 'dynamics') {
+        const yColumn = document.getElementById('yColumnSelect').value;
+        if (!column) {
+            alert('Выберите столбец-дату для оси X');
+            return;
+        }
+        if (!yColumn) {
+            alert('Выберите числовой столбец для оси Y');
+            return;
+        }
+        document.getElementById('vizPlaceholder').style.display = 'none';
+        try {
+            await createDynamicsChart(column, yColumn);
+        } catch (error) {
+            alert('Ошибка построения динамики: ' + error.message);
+            console.error(error);
+        }
+        return;
+    }
+
+    if (!column) {
         alert('Выберите столбец для визуализации');
         return;
     }
@@ -545,8 +903,6 @@ async function generateVisualization() {
     try {
         if (vizType === 'distribution') {
             await createDistributionChartFromAPI(column);
-        } else if (vizType === 'correlation') {
-            alert('Визуализация корреляций доступна в разделе "Качество данных"');
         } else if (vizType === 'outliers') {
             await createOutliersChart(column);
         }
@@ -554,6 +910,64 @@ async function generateVisualization() {
         alert('Ошибка создания визуализации: ' + error.message);
         console.error(error);
     }
+}
+
+async function createDynamicsChart(xCol, yCol) {
+    const base = `${API_BASE_URL}/api/visualization/dynamics?x=${encodeURIComponent(xCol)}&y=${encodeURIComponent(yCol)}`;
+    const url = buildTableQuery(base);
+    const response = await fetch(url);
+    if (!response.ok) {
+        const t = await response.text();
+        throw new Error(`Ошибка ${response.status}: ${t}`);
+    }
+    const json = await response.json();
+    const data = json.data || {};
+
+    if (currentChart) {
+        currentChart.destroy();
+    }
+
+    if (!Array.isArray(data.labels) || data.labels.length === 0) {
+        document.getElementById('vizPlaceholder').style.display = 'flex';
+        document.getElementById('vizPlaceholder').querySelector('p').textContent =
+            'Нет данных для построения динамики (проверь, что в столбце X есть валидные даты).';
+        return;
+    }
+
+    const granularityLabel = data.freq === 'M' ? 'по месяцам' : data.freq === 'W' ? 'по неделям' : 'по дням';
+
+    currentChart = new Chart(document.getElementById('chartCanvas'), {
+        type: 'line',
+        data: {
+            labels: data.labels,
+            datasets: [{
+                label: `Сумма ${yCol} ${granularityLabel}`,
+                data: data.values,
+                borderColor: 'rgba(79, 70, 229, 1)',
+                backgroundColor: 'rgba(79, 70, 229, 0.15)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.25,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: true },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                x: { title: { display: true, text: xCol } },
+                y: { beginAtZero: true, title: { display: true, text: `Сумма ${yCol}` } }
+            }
+        }
+    });
+
+    document.getElementById('vizPlaceholder').style.display = 'none';
 }
 
 function buildTableQuery(initial = '') {
@@ -990,6 +1404,31 @@ async function sendMessage() {
         return;
     }
 
+    // Если у пользователя ещё нет активного чата — создаём первый автоматически.
+    if (!currentChatId) {
+        try {
+            const created = await fetch(`${API_BASE_URL}/api/chats`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            if (!created.ok) {
+                const t = await created.text();
+                throw new Error(`${created.status}: ${t}`);
+            }
+            const data = await created.json();
+            currentChatId = data.chat.id;
+            await loadChatList();
+        } catch (err) {
+            alert('Не удалось создать чат: ' + err.message);
+            return;
+        }
+    }
+
+    // Если в окне ещё стандартное приветствие — почистим, чтобы было видно только сообщения чата.
+    const greeting = document.getElementById('chatGreeting');
+    if (greeting && greeting.parentElement) greeting.parentElement.removeChild(greeting);
+
     addChatMessage(message, 'user');
     input.value = '';
     input.disabled = true;
@@ -998,7 +1437,7 @@ async function sendMessage() {
     const thinkingEl = addChatMessage('Настя думает...', 'assistant', { ephemeral: true });
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
+        const response = await fetch(`${API_BASE_URL}/api/chats/${encodeURIComponent(currentChatId)}/message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message })
@@ -1016,6 +1455,9 @@ async function sendMessage() {
             renderAgentTrace(data.trace);
         }
         addChatMessage(data.reply || '(пустой ответ)', 'assistant');
+
+        // Подтягиваем обновлённый список (имя чата мог автопереименоваться).
+        loadChatList().catch(() => {});
     } catch (err) {
         if (thinkingEl && thinkingEl.remove) thinkingEl.remove();
         addChatMessage('Упс, что-то пошло не так: ' + err.message, 'assistant');
@@ -1290,6 +1732,65 @@ function getSimulatedResponse(message) {
 
 // Remove old CSV parser - not needed with backend
 // Parse CSV function removed
+
+// ---------------------------------------------------------------------------
+// Support modal
+// ---------------------------------------------------------------------------
+
+function openSupportModal() {
+    const modal = document.getElementById('supportModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    setTimeout(() => {
+        const subj = document.getElementById('supportSubject');
+        if (subj) subj.focus();
+    }, 50);
+}
+
+function closeSupportModal() {
+    const modal = document.getElementById('supportModal');
+    if (!modal) return;
+    modal.style.display = 'none';
+}
+
+function onSupportOverlayClick(event) {
+    if (event.target && event.target.id === 'supportModal') {
+        closeSupportModal();
+    }
+}
+
+async function submitSupport() {
+    const subject = (document.getElementById('supportSubject').value || '').trim();
+    const description = (document.getElementById('supportDescription').value || '').trim();
+    const email = (document.getElementById('supportEmail').value || '').trim();
+
+    if (!subject || !description) {
+        alert('Заполните тему и описание.');
+        return;
+    }
+
+    const submitBtn = document.querySelector('#supportForm button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+        const resp = await fetch(`${API_BASE_URL}/api/support`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject, description, email })
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`${resp.status}: ${t}`);
+        }
+        alert('Спасибо! Ваше обращение принято.');
+        document.getElementById('supportForm').reset();
+        closeSupportModal();
+    } catch (err) {
+        alert('Не удалось отправить обращение: ' + err.message);
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
+    }
+}
 
 // Initialization message
 console.log('Dataset Analyzer initialized! 🚀');

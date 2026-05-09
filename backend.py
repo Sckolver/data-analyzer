@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, inspect as sa_inspect
 from sqlalchemy.engine import Engine
 
 from nastya_agent import NastyaAgent
+import chats_store
 
 warnings.filterwarnings('ignore')
 
@@ -260,10 +261,30 @@ def analyze_missing_patterns(df: pd.DataFrame) -> Dict[str, Any]:
     }
 
 
+def _is_id_like(col_name: str) -> bool:
+    """ID-столбцы исключаем из корреляций — корреляции по идентификаторам бессмысленны."""
+    if col_name is None:
+        return False
+    name = str(col_name).strip().lower()
+    if name in ("id", "uid", "uuid", "guid"):
+        return True
+    if name.endswith("_id") or name.startswith("id_"):
+        return True
+    # camelCase варианты: clientId, userID → после lower: clientid, userid
+    if name.endswith("id") and len(name) > 2 and not name.endswith("oid"):
+        # эвристика: 'paid', 'said', 'rapid' — слова с 'id' на конце, но они редки в табличных схемах;
+        # допускаем, чтобы фильтр был чуть агрессивнее — корреляция по ним всё равно редко даёт смысл.
+        return True
+    return False
+
+
 def calculate_correlation_matrix(df: pd.DataFrame) -> Dict[str, Any]:
-    """Вычисляет корреляционную матрицу для числовых столбцов"""
+    """Вычисляет корреляционную матрицу для числовых столбцов (без id-столбцов)."""
     numeric_df = df.select_dtypes(include=[np.number])
-    
+    # Отфильтровываем id-подобные столбцы — корреляции по идентификаторам бессмысленны.
+    keep_cols = [c for c in numeric_df.columns if not _is_id_like(c)]
+    numeric_df = numeric_df[keep_cols]
+
     if len(numeric_df.columns) < 2:
         return {"available": False, "reason": "Недостаточно числовых столбцов"}
     
@@ -571,6 +592,62 @@ async def get_missing_visualization(table: Optional[str] = Query(default=None)):
     }))
 
 
+@app.get("/api/visualization/dynamics")
+async def get_dynamics(
+    x: str = Query(..., description="Имя столбца с датой (ось X)"),
+    y: str = Query(..., description="Имя числового столбца (ось Y, агрегируется суммой)"),
+    table: Optional[str] = Query(default=None),
+):
+    """Динамика во времени: суммирует Y по дате X.
+
+    Возвращает {labels: [...], values: [...]}. Группировка автоматическая:
+    по дню если диапазон <= ~2 лет, иначе по месяцу.
+    """
+    df = _select_dataset(table)
+    if x not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Столбец '{x}' не найден")
+    if y not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Столбец '{y}' не найден")
+
+    try:
+        x_series = pd.to_datetime(df[x], errors="coerce")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Не удалось распарсить '{x}' как дату: {e}")
+
+    if not pd.api.types.is_numeric_dtype(df[y]):
+        raise HTTPException(status_code=400, detail=f"Столбец '{y}' не числовой")
+
+    work = pd.DataFrame({"x": x_series, "y": df[y]}).dropna(subset=["x"])
+    if work.empty:
+        return JSONResponse(to_py({"success": True, "data": {"labels": [], "values": [], "freq": "D"}}))
+
+    span_days = (work["x"].max() - work["x"].min()).days or 1
+    if span_days > 730:
+        freq = "M"
+        work["bucket"] = work["x"].dt.to_period("M").dt.to_timestamp()
+    elif span_days > 90:
+        freq = "W"
+        work["bucket"] = work["x"].dt.to_period("W").dt.start_time
+    else:
+        freq = "D"
+        work["bucket"] = work["x"].dt.normalize()
+
+    grouped = work.groupby("bucket", as_index=True)["y"].sum().sort_index()
+    labels = [d.strftime("%Y-%m-%d") for d in grouped.index]
+    values = [float(v) if not pd.isna(v) else None for v in grouped.values]
+
+    return JSONResponse(to_py({
+        "success": True,
+        "data": {
+            "labels": labels,
+            "values": values,
+            "freq": freq,
+            "x_column": x,
+            "y_column": y,
+        }
+    }))
+
+
 @app.get("/api/columns")
 async def get_columns(table: Optional[str] = Query(default=None)):
     """Получить список столбцов датасета / выбранной таблицы БД."""
@@ -595,6 +672,35 @@ async def health_check():
 
 class ChatRequest(BaseModel):
     message: str
+
+
+class SupportRequest(BaseModel):
+    subject: str
+    description: str
+    email: Optional[str] = None
+
+
+class ChatCreateRequest(BaseModel):
+    name: Optional[str] = None
+
+
+class ChatRenameRequest(BaseModel):
+    name: str
+
+
+def build_session_key() -> str:
+    """Уникальный ключ текущей сессии (датасета или подключения к БД)."""
+    if data_source_mode == "database":
+        dialect = (db_meta.get("dialect") or "db")
+        host = db_meta.get("host") or "local"
+        port = db_meta.get("port") or ""
+        user = (db_meta.get("user") or "")
+        dbname = db_meta.get("dbname") or ""
+        return f"db:{dialect}://{user}@{host}:{port}/{dbname}"
+    if data_source_mode == "dataset":
+        fname = (dataset_metadata or {}).get("filename") or "unnamed"
+        return f"dataset:{fname}"
+    return "unknown:none"
 
 
 class DbConnectRequest(BaseModel):
@@ -731,6 +837,7 @@ async def connect_db(req: DbConnectRequest):
         "dbname": req.dbname,
         "host": req.host,
         "port": req.port,
+        "user": req.user,
         "connected_at": datetime.now().isoformat(),
     }
     current_table_name = first_table
@@ -783,7 +890,7 @@ async def get_db_tables():
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    """Диалог с Настей: крутим tool-call цикл до финального текстового ответа."""
+    """Диалог с Настей (без хранения чатов). Совместимость со старым клиентом."""
     global nastya_agent
     if nastya_agent is None or current_dataset is None:
         raise HTTPException(status_code=400, detail="Датасет не загружен")
@@ -804,6 +911,160 @@ async def chat_reset():
         raise HTTPException(status_code=400, detail="Датасет не загружен")
     nastya_agent.reset()
     return JSONResponse({"success": True})
+
+
+# ---------------------------------------------------------------------------
+# Многочатность: список / создание / переименование / удаление / отправка
+# ---------------------------------------------------------------------------
+
+def _ensure_loaded() -> None:
+    if data_source_mode is None or current_dataset is None:
+        raise HTTPException(status_code=400, detail="Источник данных не подключён")
+
+
+@app.get("/api/chats")
+async def list_user_chats():
+    _ensure_loaded()
+    session_key = build_session_key()
+    return JSONResponse(to_py({
+        "success": True,
+        "session_key": session_key,
+        "chats": chats_store.list_chats(session_key),
+    }))
+
+
+@app.post("/api/chats")
+async def create_user_chat(req: ChatCreateRequest):
+    _ensure_loaded()
+    session_key = build_session_key()
+    chat_meta = chats_store.create_chat(session_key, req.name)
+    return JSONResponse(to_py({"success": True, "chat": chat_meta}))
+
+
+@app.get("/api/chats/{chat_id}")
+async def get_user_chat(chat_id: str):
+    _ensure_loaded()
+    session_key = build_session_key()
+    chat = chats_store.get_chat(session_key, chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Чат не найден")
+    # Из истории отдаём только текстовые реплики user/assistant — без tool-calls.
+    visible = []
+    for msg in chat.get("history") or []:
+        role = msg.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = msg.get("content")
+        if not content:
+            continue
+        visible.append({"role": role, "content": content})
+    return JSONResponse(to_py({
+        "success": True,
+        "chat": {
+            "id": chat["id"],
+            "name": chat["name"],
+            "created_at": chat.get("created_at"),
+            "updated_at": chat.get("updated_at"),
+            "messages": visible,
+        }
+    }))
+
+
+@app.patch("/api/chats/{chat_id}")
+async def rename_user_chat(chat_id: str, req: ChatRenameRequest):
+    _ensure_loaded()
+    session_key = build_session_key()
+    updated = chats_store.rename_chat(session_key, chat_id, req.name)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Чат не найден или пустое имя")
+    return JSONResponse(to_py({"success": True, "chat": updated}))
+
+
+@app.delete("/api/chats/{chat_id}")
+async def delete_user_chat(chat_id: str):
+    _ensure_loaded()
+    session_key = build_session_key()
+    ok = chats_store.delete_chat(session_key, chat_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Чат не найден")
+    return JSONResponse({"success": True})
+
+
+@app.post("/api/chats/{chat_id}/message")
+async def send_message_in_chat(chat_id: str, req: ChatRequest):
+    """Отправка сообщения в конкретный чат: подменяем history агента, гоняем цикл, сохраняем."""
+    global nastya_agent
+    _ensure_loaded()
+    if nastya_agent is None:
+        raise HTTPException(status_code=400, detail="Ассистент не инициализирован")
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Пустое сообщение")
+
+    session_key = build_session_key()
+    chat = chats_store.get_chat(session_key, chat_id)
+    if chat is None:
+        raise HTTPException(status_code=404, detail="Чат не найден")
+
+    # Подменяем историю агента на историю выбранного чата.
+    saved_history = nastya_agent.history
+    nastya_agent.history = list(chat.get("history") or [])
+    try:
+        result = nastya_agent.chat(req.message)
+        new_history = list(nastya_agent.history)
+    except Exception as e:
+        nastya_agent.history = saved_history
+        raise HTTPException(status_code=500, detail=f"Ошибка LLM: {e}")
+    finally:
+        # После сохранения возвращаем агенту его собственную историю,
+        # чтобы старый /api/chat не получил мусора.
+        pass
+
+    chats_store.update_chat_history(session_key, chat_id, new_history)
+    nastya_agent.history = saved_history
+
+    # Если у чата дефолтное имя «Новый чат» — переименуем по первому сообщению.
+    chat_meta = next((c for c in chats_store.list_chats(session_key) if c["id"] == chat_id), None)
+    if chat_meta and (chat_meta.get("name") or "").strip() in ("", "Новый чат"):
+        suggested = req.message.strip().splitlines()[0][:40] or "Новый чат"
+        chats_store.rename_chat(session_key, chat_id, suggested)
+
+    return JSONResponse(to_py({"success": True, **result}))
+
+
+SUPPORT_LOG_PATH = "support.log"
+
+
+@app.post("/api/support")
+async def submit_support(req: SupportRequest):
+    """Принимает обращение в поддержку и дописывает запись в support.log."""
+    subject = (req.subject or "").strip()
+    description = (req.description or "").strip()
+    if not subject:
+        raise HTTPException(status_code=400, detail="Тема не может быть пустой")
+    if not description:
+        raise HTTPException(status_code=400, detail="Описание не может быть пустым")
+
+    entry = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "subject": subject,
+        "description": description,
+        "email": (req.email or "").strip() or None,
+        "context": {
+            "mode": data_source_mode,
+            "dialect": db_meta.get("dialect"),
+            "dbname": db_meta.get("dbname"),
+            "table": current_table_name,
+            "dataset": (dataset_metadata or {}).get("filename"),
+        }
+    }
+
+    try:
+        with open(SUPPORT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Не удалось сохранить обращение: {e}")
+
+    return JSONResponse({"success": True, "message": "Обращение принято. Спасибо!"})
 
 
 if __name__ == "__main__":

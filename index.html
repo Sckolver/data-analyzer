@@ -15,11 +15,48 @@
                 <h1>T-Analyze</h1>
                 <p class="subtitle">Анализ данных с AI и автоматическими метриками</p>
             </div>
-            <button class="btn-home" onclick="goHome()" title="На главную">
-                <i class="fas fa-home"></i>
-                <span>На главную</span>
-            </button>
+            <div class="header-actions">
+                <button class="btn-support" onclick="openSupportModal()" title="Поддержка">
+                    <i class="fas fa-life-ring"></i>
+                    <span>Поддержка</span>
+                </button>
+                <button class="btn-home" onclick="goHome()" title="На главную">
+                    <i class="fas fa-home"></i>
+                    <span>На главную</span>
+                </button>
+            </div>
         </header>
+
+        <!-- Support modal -->
+        <div class="modal-overlay" id="supportModal" style="display: none;" onclick="onSupportOverlayClick(event)">
+            <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="supportTitle">
+                <button class="modal-close" onclick="closeSupportModal()" aria-label="Закрыть">
+                    <i class="fas fa-times"></i>
+                </button>
+                <h3 id="supportTitle"><i class="fas fa-life-ring"></i> Связаться с поддержкой</h3>
+                <p class="modal-subtitle">Опишите проблему — мы передадим её команде.</p>
+                <form id="supportForm" onsubmit="event.preventDefault(); submitSupport();">
+                    <div class="form-row">
+                        <label for="supportSubject">Тема</label>
+                        <input type="text" id="supportSubject" required maxlength="200" placeholder="Например: не подключается БД">
+                    </div>
+                    <div class="form-row">
+                        <label for="supportDescription">Описание</label>
+                        <textarea id="supportDescription" required rows="5" placeholder="Что произошло? Что вы ожидали? Что увидели?"></textarea>
+                    </div>
+                    <div class="form-row">
+                        <label for="supportEmail">Email для ответа (необязательно)</label>
+                        <input type="email" id="supportEmail" placeholder="you@example.com">
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn-secondary" onclick="closeSupportModal()">Отмена</button>
+                        <button type="submit" class="btn-primary">
+                            <i class="fas fa-paper-plane"></i> Отправить
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
 
         <!-- Source Selection -->
         <section class="source-section" id="sourceSection">
@@ -136,6 +173,26 @@
                     </div>
                 </div>
 
+                <!-- DB-only: метаданные источника по выбранной таблице -->
+                <div class="info-grid db-meta-grid" id="dbMetaGrid" style="display: none;">
+                    <div class="info-card meta-card">
+                        <span class="info-label"><i class="fas fa-user-tie"></i> Владелец данных</span>
+                        <span class="meta-value" id="dbOwner">—</span>
+                    </div>
+                    <div class="info-card meta-card">
+                        <span class="info-label"><i class="fas fa-bullseye"></i> Назначение</span>
+                        <span class="meta-value" id="dbPurpose">—</span>
+                    </div>
+                    <div class="info-card meta-card">
+                        <span class="info-label"><i class="fas fa-clock"></i> Частота обновления</span>
+                        <span class="meta-value" id="dbFrequency">—</span>
+                    </div>
+                    <div class="info-card meta-card">
+                        <span class="info-label"><i class="fas fa-shield-halved"></i> Уровень чувствительности</span>
+                        <span class="meta-value" id="dbSensitivity">—</span>
+                    </div>
+                </div>
+
                 <!-- Table picker (только в DB-режиме) -->
                 <div class="table-picker" id="tablePickerRow" style="display: none;">
                     <label for="tablePicker"><i class="fas fa-table"></i> Таблица:</label>
@@ -247,16 +304,23 @@
                             <label for="vizType">Тип визуализации:</label>
                             <select id="vizType">
                                 <option value="distribution">Распределение</option>
-                                <option value="correlation">Корреляция</option>
                                 <option value="missing">Карта пропусков</option>
                                 <option value="outliers">Выбросы</option>
+                                <option value="dynamics">Динамика во времени</option>
                             </select>
                         </div>
                         
-                        <div class="control-group">
-                            <label for="columnSelect">Столбец:</label>
+                        <div class="control-group" id="columnSelectGroup">
+                            <label for="columnSelect" id="columnSelectLabel">Столбец:</label>
                             <select id="columnSelect">
                                 <option>Выберите столбец...</option>
+                            </select>
+                        </div>
+
+                        <div class="control-group" id="yColumnGroup" style="display: none;">
+                            <label for="yColumnSelect">Столбец Y (сумма):</label>
+                            <select id="yColumnSelect">
+                                <option>Выберите числовой столбец...</option>
                             </select>
                         </div>
 
@@ -294,50 +358,62 @@
                 <!-- AI Chat Tab -->
                 <div class="tab-pane" id="chat">
                     <h2>Настя — AI ассистент для анализа данных ✿</h2>
-                    
-                    <div class="chat-container">
-                        <div class="chat-messages" id="chatMessages">
-                            <div class="chat-message assistant" id="chatGreeting">
-                                <div class="message-avatar">
-                                    <i class="fas fa-heart" style="color:#ec4899;"></i>
-                                </div>
-                                <div class="message-content">
-                                    <p id="chatGreetingText">Приветик! Я Настя ✿ Загружай датасет и спрашивай что угодно — я посмотрю сама через SQL и pandas и всё тебе расскажу ☺️</p>
-                                    <div class="suggestions">
-                                        <p><strong>Например, можно спросить:</strong></p>
-                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
-                                            Какие столбцы имеют наибольшее количество пропусков?
-                                        </button>
-                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
-                                            Покажи статистику по числовым столбцам
-                                        </button>
-                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
-                                            Есть ли корреляция между столбцами?
-                                        </button>
-                                        <button class="suggestion-btn" onclick="sendSuggestion(this)">
-                                            Найди выбросы в данных
-                                        </button>
+
+                    <div class="chat-layout">
+                        <aside class="chat-sidebar" id="chatSidebar">
+                            <button class="btn-new-chat" onclick="createNewChat()">
+                                <i class="fas fa-plus"></i> Новый чат
+                            </button>
+                            <div class="chat-list" id="chatList">
+                                <div class="chat-list-empty">Здесь появятся ваши диалоги.</div>
+                            </div>
+                        </aside>
+
+                        <div class="chat-container">
+                            <div class="chat-messages" id="chatMessages">
+                                <div class="chat-message assistant" id="chatGreeting">
+                                    <div class="message-avatar">
+                                        <i class="fas fa-heart" style="color:#ec4899;"></i>
+                                    </div>
+                                    <div class="message-content">
+                                        <p id="chatGreetingText">Приветик! Я Настя ✿ Загружай датасет и спрашивай что угодно — я посмотрю сама через SQL и pandas и всё тебе расскажу ☺️</p>
+                                        <div class="suggestions">
+                                            <p><strong>Например, можно спросить:</strong></p>
+                                            <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                                Какие столбцы имеют наибольшее количество пропусков?
+                                            </button>
+                                            <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                                Покажи статистику по числовым столбцам
+                                            </button>
+                                            <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                                Есть ли корреляция между столбцами?
+                                            </button>
+                                            <button class="suggestion-btn" onclick="sendSuggestion(this)">
+                                                Найди выбросы в данных
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div class="chat-input-container">
-                            <div class="chat-input-wrapper">
-                                <input 
-                                    type="text" 
-                                    id="chatInput" 
-                                    placeholder="Задайте вопрос о датасете..."
-                                    onkeypress="handleChatKeypress(event)"
-                                >
-                                <button class="btn-send" onclick="sendMessage()">
-                                    <i class="fas fa-paper-plane"></i>
-                                </button>
-                            </div>
-                            <div class="chat-info">
-                                <span class="status-indicator" id="aiStatus">
-                                    <i class="fas fa-circle"></i> Backend не подключен
-                                </span>
+                            <div class="chat-input-container">
+                                <div class="chat-input-wrapper">
+                                    <input 
+                                        type="text" 
+                                        id="chatInput" 
+                                        placeholder="Задайте вопрос о датасете..."
+                                        onkeypress="handleChatKeypress(event)"
+                                    >
+                                    <button class="btn-send" onclick="sendMessage()">
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </div>
+                                <div class="chat-info">
+                                    <span class="status-indicator" id="aiStatus">
+                                        <i class="fas fa-circle"></i> Backend не подключен
+                                    </span>
+                                    <span class="chat-current-name" id="chatCurrentName"></span>
+                                </div>
                             </div>
                         </div>
                     </div>

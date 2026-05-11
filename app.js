@@ -336,7 +336,7 @@ function formatTodayUpdateLabel() {
     const dd = String(now.getDate()).padStart(2, '0');
     const mm = String(now.getMonth() + 1).padStart(2, '0');
     const yyyy = now.getFullYear();
-    return `Обновлено 09:00 ${dd}.${mm}.${yyyy}`;
+    return `09:00 ${dd}.${mm}.${yyyy}`;
 }
 
 function fillSourceMetadataCards() {
@@ -352,10 +352,10 @@ function fillSourceMetadataCards() {
 
     // Захардкоженные значения для демонстрационных целей
     const meta = {
-        owner: 'Анастасия Князева',
+        owner: 'Анастасия Князева (a.knyazeva)',
         purpose: 'Аналитика инвестиционных операций',
         update: formatTodayUpdateLabel(),
-        sensitivity: 'Конфиденциально',
+        sensitivity: 'Конфиденциальные данные',
     };
     const set = (id, value) => {
         const el = document.getElementById(id);
@@ -1343,7 +1343,7 @@ function renderChatHistory(history) {
                 <i class="fas fa-robot" style="color:#3b82f6;"></i>
             </div>
             <div class="message-content">
-                <p id="chatGreetingText">Новый диалог. Задайте вопрос на основе текущих данных.</p>
+                <p id="chatGreetingText">Привет! Я AI-ассистент. Задавай вопрос на основе текущих данных.</p>
             </div>
         </div>
     `;

@@ -82,6 +82,7 @@ current_table_name: Optional[str] = None
 BASE_DIR = Path(__file__).resolve().parent
 CHATS_PATH = BASE_DIR / "chats.json"
 SUPPORT_PATH = BASE_DIR / "support.json"
+FEEDBACK_PATH = BASE_DIR / "feedback.json"
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
@@ -762,6 +763,15 @@ class SupportTicket(BaseModel):
     email: Optional[str] = None
 
 
+class FeedbackRequest(BaseModel):
+    chat_id: Optional[str] = None
+    feedback: str  # "like" | "dislike"
+    comment: Optional[str] = None
+    user_message: Optional[str] = None
+    assistant_message: Optional[str] = None
+    response_time_ms: Optional[int] = None
+
+
 class DbConnectRequest(BaseModel):
     dialect: str
     dbname: str
@@ -1128,6 +1138,52 @@ async def create_support_ticket(t: SupportTicket):
     _atomic_write_json(SUPPORT_PATH, data)
 
     return JSONResponse({"success": True, "ticket_id": ticket["id"]})
+
+
+# ---------------------------------------------------------------------------
+# Фидбек на ответы Насти (лайк / дизлайк с комментарием)
+# ---------------------------------------------------------------------------
+
+def _load_feedback() -> Dict[str, Any]:
+    if not FEEDBACK_PATH.exists():
+        return {"items": []}
+    try:
+        with open(FEEDBACK_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict) or "items" not in data or not isinstance(data["items"], list):
+            return {"items": []}
+        return data
+    except (json.JSONDecodeError, OSError):
+        return {"items": []}
+
+
+@app.post("/api/feedback")
+async def submit_feedback(req: FeedbackRequest):
+    """Принимает лайк/дизлайк на сообщение Насти и сохраняет в feedback.json."""
+    kind = (req.feedback or "").strip().lower()
+    if kind not in ("like", "dislike"):
+        raise HTTPException(status_code=400, detail="feedback должен быть 'like' или 'dislike'")
+
+    comment = (req.comment or "").strip() or None
+    user_msg = (req.user_message or "").strip() or None
+    assistant_msg = (req.assistant_message or "").strip() or None
+
+    data = _load_feedback()
+    item = {
+        "id": uuid.uuid4().hex,
+        "chat_id": req.chat_id,
+        "source_id": _current_source_id(),
+        "feedback": kind,
+        "comment": comment,
+        "user_message": user_msg,
+        "assistant_message": assistant_msg,
+        "response_time_ms": req.response_time_ms,
+        "created_at": datetime.now().isoformat(),
+    }
+    data["items"].append(item)
+    _atomic_write_json(FEEDBACK_PATH, data)
+
+    return JSONResponse({"success": True, "feedback_id": item["id"]})
 
 
 if __name__ == "__main__":

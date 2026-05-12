@@ -40,6 +40,7 @@ t-analyze.zip
 # Runtime data created by backend at runtime
 chats.json
 support.json
+feedback.json
 
 # Local macOS venv
 venv_mac/

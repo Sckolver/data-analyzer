@@ -1465,3 +1465,175 @@ tbody tr:hover {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary-dark);
 }
+
+/* ---------------------------------------------------------------------------
+   Chat: action buttons (copy / like / dislike), feedback form, response timer
+   --------------------------------------------------------------------------- */
+
+.message-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-color);
+}
+
+.msg-action-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85rem;
+    transition: all 0.15s ease;
+}
+
+.msg-action-btn:hover {
+    background: var(--light-bg);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
+.msg-action-btn.active.like {
+    background: #E4F7E5;
+    border-color: var(--success-color);
+    color: var(--success-color);
+}
+
+.msg-action-btn.active.dislike {
+    background: #FDECEA;
+    border-color: var(--danger-color);
+    color: var(--danger-color);
+}
+
+.msg-action-btn[disabled] {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.message-response-time {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.message-response-time i {
+    font-size: 0.78rem;
+}
+
+/* Inline dislike feedback form */
+.feedback-form {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: #FDFBF7;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.feedback-form textarea {
+    width: 100%;
+    min-height: 60px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: white;
+    font-family: inherit;
+    font-size: 0.92rem;
+    color: var(--text-primary);
+    resize: vertical;
+}
+
+.feedback-form textarea:focus {
+    outline: none;
+    border-color: var(--danger-color);
+}
+
+.feedback-form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.feedback-form button {
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.88rem;
+    font-weight: 600;
+    transition: opacity 0.15s ease;
+}
+
+.feedback-form .btn-cancel {
+    background: var(--light-bg);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.feedback-form .btn-submit {
+    background: var(--danger-color);
+    color: white;
+}
+
+.feedback-form button:hover {
+    opacity: 0.85;
+}
+
+.feedback-saved {
+    margin-top: 8px;
+    font-size: 0.82rem;
+    color: var(--success-color);
+    font-style: italic;
+}
+
+/* Toast (copied confirmation) */
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 32px;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--accent-color);
+    color: white;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 0.92rem;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 10000;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.toast i {
+    color: var(--success-color);
+}
+
+/* Live timer in "thinking" message */
+.thinking-timer {
+    margin-left: 8px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+}

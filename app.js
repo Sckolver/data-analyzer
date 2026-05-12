@@ -1387,6 +1387,20 @@ async function sendMessage() {
 
     const thinkingEl = addChatMessage('Анализирую данные...', 'assistant', { ephemeral: true });
 
+    // Секундомер: тикаем в плашке "Анализирую данные..." пока ждём ответ.
+    const startedAt = performance.now();
+    const timerSpan = document.createElement('span');
+    timerSpan.className = 'thinking-timer';
+    timerSpan.textContent = '0.0 с';
+    if (thinkingEl) {
+        const contentEl = thinkingEl.querySelector('.message-content');
+        if (contentEl) contentEl.appendChild(timerSpan);
+    }
+    const tickHandle = setInterval(() => {
+        const elapsedSec = (performance.now() - startedAt) / 1000;
+        timerSpan.textContent = elapsedSec.toFixed(1) + ' с';
+    }, 100);
+
     try {
         const response = await fetch(`${API_BASE_URL}/api/chat`, {
             method: 'POST',
@@ -1400,13 +1414,16 @@ async function sendMessage() {
         }
 
         const data = await response.json();
+        const responseTimeMs = Math.round(performance.now() - startedAt);
+        clearInterval(tickHandle);
         if (thinkingEl && thinkingEl.remove) thinkingEl.remove();
 
         if (Array.isArray(data.trace) && data.trace.length > 0) {
             renderAgentTrace(data.trace);
         }
-        addChatMessage(data.reply || '(пустой ответ)', 'assistant');
+        addChatMessage(data.reply || '(пустой ответ)', 'assistant', { responseTimeMs });
     } catch (err) {
+        clearInterval(tickHandle);
         if (thinkingEl && thinkingEl.remove) thinkingEl.remove();
         addChatMessage('Упс, что-то пошло не так: ' + err.message, 'assistant');
         console.error(err);
@@ -1486,6 +1503,9 @@ function sendSuggestion(button) {
     sendMessage();
 }
 
+// Помним последнее сообщение пользователя — нужно для контекста фидбека.
+let __lastUserMessage = '';
+
 function addChatMessage(message, sender, options = {}) {
     const messagesContainer = document.getElementById('chatMessages');
     const messageDiv = document.createElement('div');
@@ -1511,8 +1531,186 @@ function addChatMessage(message, sender, options = {}) {
     `;
 
     messagesContainer.appendChild(messageDiv);
+
+    if (sender === 'user') {
+        __lastUserMessage = message || '';
+    }
+
+    // Реальный (нерепликовый) ответ ассистента — добавляем панель действий и время.
+    if (sender === 'assistant' && !options.ephemeral) {
+        appendAssistantActions(messageDiv, message, {
+            responseTimeMs: options.responseTimeMs,
+            userMessage: __lastUserMessage,
+        });
+    }
+
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
     return messageDiv;
+}
+
+function appendAssistantActions(messageDiv, assistantText, ctx) {
+    const content = messageDiv.querySelector('.message-content');
+    if (!content) return;
+
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'msg-action-btn copy';
+    copyBtn.title = 'Скопировать';
+    copyBtn.innerHTML = '<i class="far fa-copy"></i>';
+    copyBtn.addEventListener('click', () => copyMessageText(assistantText));
+
+    const likeBtn = document.createElement('button');
+    likeBtn.className = 'msg-action-btn like';
+    likeBtn.title = 'Полезный ответ';
+    likeBtn.innerHTML = '<i class="far fa-thumbs-up"></i>';
+
+    const dislikeBtn = document.createElement('button');
+    dislikeBtn.className = 'msg-action-btn dislike';
+    dislikeBtn.title = 'Неудачный ответ';
+    dislikeBtn.innerHTML = '<i class="far fa-thumbs-down"></i>';
+
+    likeBtn.addEventListener('click', () => {
+        if (likeBtn.classList.contains('active') || dislikeBtn.classList.contains('active')) return;
+        sendFeedback({
+            feedback: 'like',
+            user_message: ctx.userMessage,
+            assistant_message: assistantText,
+            response_time_ms: ctx.responseTimeMs,
+        }).then(() => {
+            likeBtn.classList.add('active');
+            dislikeBtn.disabled = true;
+            showToast('Спасибо за оценку!');
+        }).catch(err => alert('Не удалось отправить: ' + err.message));
+    });
+
+    dislikeBtn.addEventListener('click', () => {
+        if (likeBtn.classList.contains('active') || dislikeBtn.classList.contains('active')) return;
+        if (content.querySelector('.feedback-form')) return;
+        const form = buildDislikeForm({
+            assistantText,
+            userMessage: ctx.userMessage,
+            responseTimeMs: ctx.responseTimeMs,
+            onSubmitted: () => {
+                dislikeBtn.classList.add('active');
+                likeBtn.disabled = true;
+            }
+        });
+        content.appendChild(form);
+        form.querySelector('textarea').focus();
+    });
+
+    actions.appendChild(copyBtn);
+    actions.appendChild(likeBtn);
+    actions.appendChild(dislikeBtn);
+
+    if (Number.isFinite(ctx.responseTimeMs)) {
+        const t = document.createElement('span');
+        t.className = 'message-response-time';
+        t.innerHTML = `<i class="far fa-clock"></i> Ответ за ${formatSeconds(ctx.responseTimeMs)} с`;
+        actions.appendChild(t);
+    }
+
+    content.appendChild(actions);
+}
+
+function buildDislikeForm({ assistantText, userMessage, responseTimeMs, onSubmitted }) {
+    const form = document.createElement('div');
+    form.className = 'feedback-form';
+    form.innerHTML = `
+        <label style="font-size:0.88rem; color:var(--text-secondary);">
+            Что было не так? Опишите проблему — это поможет улучшить ответы.
+        </label>
+        <textarea placeholder="Например: ответ не по делу, неверные числа, не учтён контекст..."></textarea>
+        <div class="feedback-form-actions">
+            <button type="button" class="btn-cancel">Отмена</button>
+            <button type="button" class="btn-submit">Отправить</button>
+        </div>
+    `;
+
+    const textarea = form.querySelector('textarea');
+    const cancelBtn = form.querySelector('.btn-cancel');
+    const submitBtn = form.querySelector('.btn-submit');
+
+    cancelBtn.addEventListener('click', () => form.remove());
+
+    submitBtn.addEventListener('click', async () => {
+        const comment = (textarea.value || '').trim();
+        submitBtn.disabled = true;
+        cancelBtn.disabled = true;
+        try {
+            await sendFeedback({
+                feedback: 'dislike',
+                comment,
+                user_message: userMessage,
+                assistant_message: assistantText,
+                response_time_ms: responseTimeMs,
+            });
+            form.innerHTML = '<div class="feedback-saved"><i class="fas fa-check"></i> Спасибо! Ваш отзыв сохранён.</div>';
+            if (typeof onSubmitted === 'function') onSubmitted();
+        } catch (err) {
+            submitBtn.disabled = false;
+            cancelBtn.disabled = false;
+            alert('Не удалось отправить отзыв: ' + err.message);
+        }
+    });
+
+    return form;
+}
+
+async function sendFeedback(payload) {
+    const body = Object.assign({ chat_id: currentChatId || null }, payload);
+    const resp = await fetch(`${API_BASE_URL}/api/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+        const t = await resp.text();
+        throw new Error(`${resp.status}: ${t}`);
+    }
+    return resp.json();
+}
+
+async function copyMessageText(text) {
+    const value = String(text || '');
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(value);
+        } else {
+            // Фолбэк для http://localhost: создаём скрытый textarea.
+            const ta = document.createElement('textarea');
+            ta.value = value;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        showToast('Скопировано');
+    } catch (err) {
+        console.error('copy failed', err);
+        showToast('Не удалось скопировать');
+    }
+}
+
+let __toastTimer = null;
+function showToast(text) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    const txt = document.getElementById('toastText');
+    if (txt) txt.textContent = text;
+    el.classList.add('show');
+    if (__toastTimer) clearTimeout(__toastTimer);
+    __toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+function formatSeconds(ms) {
+    const s = (Number(ms) || 0) / 1000;
+    return s >= 10 ? s.toFixed(1) : s.toFixed(2);
 }
 
 function renderMarkdown(text) {
